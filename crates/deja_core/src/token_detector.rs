@@ -46,11 +46,12 @@ impl TokenBasedDetector {
         }
     }
 
-    /// Normalize tokens for clone detection
-    fn normalize_tokens(&self, tokens: &[Token], config: &DetectionConfig) -> Vec<String> {
+    /// Normalize tokens for clone detection, tracking original indices
+    fn normalize_tokens(&self, tokens: &[Token], config: &DetectionConfig) -> Vec<NormalizedToken> {
         tokens
             .iter()
-            .filter_map(|token| {
+            .enumerate()
+            .filter_map(|(index, token)| {
                 // Skip comments and whitespace if configured
                 if config.ignore_comments && matches!(token.token_type, TokenType::Comment) {
                     return None;
@@ -67,7 +68,10 @@ impl TokenBasedDetector {
                     _ => token.value.clone(),
                 };
 
-                Some(normalized)
+                Some(NormalizedToken {
+                    value: normalized,
+                    original_index: index,
+                })
             })
             .collect()
     }
@@ -100,14 +104,19 @@ impl TokenBasedDetector {
             // Use rolling hash to find all windows
             let mut roller = RollingHash::new(config.min_tokens);
 
-            for (i, token) in normalized.iter().enumerate() {
-                if let Some(hash) = roller.push(token) {
-                    let window_start = i.saturating_sub(config.min_tokens - 1);
-                    let window_end = i + 1;
+            for (i, norm_token) in normalized.iter().enumerate() {
+                if let Some(hash) = roller.push(&norm_token.value) {
+                    // Calculate window boundaries in the normalized array
+                    let norm_window_start = i.saturating_sub(config.min_tokens - 1);
+                    let norm_window_end = i + 1;
 
-                    // Get the original token indices (before normalization)
-                    let start_token = &tokens[window_start];
-                    let end_token = &tokens[window_end - 1];
+                    // Get the original token indices from the normalized tokens
+                    let start_orig_idx = normalized[norm_window_start].original_index;
+                    let end_orig_idx = normalized[norm_window_end - 1].original_index;
+
+                    // Access original tokens using the tracked indices
+                    let start_token = &tokens[start_orig_idx];
+                    let end_token = &tokens[end_orig_idx];
 
                     let candidate = CloneCandidate {
                         file_path: file.path.clone(),
@@ -247,6 +256,15 @@ struct CloneCandidate {
     token_count: usize,
 }
 
+/// Normalized token with original index tracking
+#[derive(Debug, Clone)]
+struct NormalizedToken {
+    /// The normalized token string
+    value: String,
+    /// The index in the original tokens array
+    original_index: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,7 +328,13 @@ mod tests {
         ];
 
         let normalized = detector.normalize_tokens(&tokens, &config);
-        assert_eq!(normalized, vec!["def", "$ID", "$LIT"]);
+        assert_eq!(normalized.len(), 3);
+        assert_eq!(normalized[0].value, "def");
+        assert_eq!(normalized[0].original_index, 0);
+        assert_eq!(normalized[1].value, "$ID");
+        assert_eq!(normalized[1].original_index, 1);
+        assert_eq!(normalized[2].value, "$LIT");
+        assert_eq!(normalized[2].original_index, 2);
     }
 
     #[test]
@@ -326,7 +350,11 @@ mod tests {
         ];
 
         let normalized = detector.normalize_tokens(&tokens, &config);
-        assert_eq!(normalized, vec!["def", "$ID"]);
+        assert_eq!(normalized.len(), 2);
+        assert_eq!(normalized[0].value, "def");
+        assert_eq!(normalized[0].original_index, 0); // First token
+        assert_eq!(normalized[1].value, "$ID");
+        assert_eq!(normalized[1].original_index, 2); // Third token (comment was skipped)
     }
 
     #[test]
@@ -342,7 +370,11 @@ mod tests {
         ];
 
         let normalized = detector.normalize_tokens(&tokens, &config);
-        assert_eq!(normalized, vec!["def", "$ID"]);
+        assert_eq!(normalized.len(), 2);
+        assert_eq!(normalized[0].value, "def");
+        assert_eq!(normalized[0].original_index, 0); // First token
+        assert_eq!(normalized[1].value, "$ID");
+        assert_eq!(normalized[1].original_index, 2); // Third token (whitespace was skipped)
     }
 
     #[test]
