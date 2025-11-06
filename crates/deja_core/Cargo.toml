@@ -9,6 +9,7 @@ repository.workspace = true
 description = "Core clone detection algorithms for Deja-vu"
 
 [dependencies]
+deja_ast = { path = "../deja_ast" }
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true

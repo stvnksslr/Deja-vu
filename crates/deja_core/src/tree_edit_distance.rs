@@ -9,7 +9,6 @@
 //! - Update: Change a node's label
 
 use deja_ast::{Ast, AstNode, NodeKind};
-use std::collections::HashMap;
 
 /// Cost weights for different edit operations
 #[derive(Debug, Clone)]
