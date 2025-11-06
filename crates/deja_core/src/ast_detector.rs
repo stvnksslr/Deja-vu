@@ -271,7 +271,10 @@ impl AstBasedDetector {
             .collect();
 
         // Group similar clone pairs into clone groups
-        self.group_clones(clone_pairs, parsed_files)
+        let groups = self.group_clones(clone_pairs, parsed_files);
+
+        // Filter out overlapping/nested clones
+        self.filter_overlapping_groups(groups)
     }
 
     /// Group clone pairs into clone groups
@@ -328,6 +331,68 @@ impl AstBasedDetector {
         }
 
         groups
+    }
+
+    /// Filter out clone groups that are entirely contained within other larger groups
+    ///
+    /// When detecting clones in nested structures (like classes containing methods),
+    /// we may detect both the outer structure and inner elements as separate clones.
+    /// This filters out the smaller nested clones to avoid redundant reporting.
+    fn filter_overlapping_groups(&self, groups: Vec<CloneGroup>) -> Vec<CloneGroup> {
+        let mut filtered = Vec::new();
+
+        for (i, group) in groups.iter().enumerate() {
+            let mut is_contained = false;
+
+            // Check if this group is contained within any other group
+            for (j, other_group) in groups.iter().enumerate() {
+                if i == j {
+                    continue;
+                }
+
+                // Check if group is entirely contained within other_group
+                if self.is_group_contained_in(group, other_group) {
+                    is_contained = true;
+                    break;
+                }
+            }
+
+            if !is_contained {
+                filtered.push(group.clone());
+            }
+        }
+
+        filtered
+    }
+
+    /// Check if group A is entirely contained within group B
+    ///
+    /// A group is contained if all its instances are subsets of corresponding
+    /// instances in the other group (same files, with line ranges fully contained).
+    fn is_group_contained_in(&self, group_a: &CloneGroup, group_b: &CloneGroup) -> bool {
+        // Groups must have same number of instances
+        if group_a.instances.len() != group_b.instances.len() {
+            return false;
+        }
+
+        // Check if every instance in A has a corresponding containing instance in B
+        for clone_a in &group_a.instances {
+            let has_container = group_b.instances.iter().any(|clone_b| {
+                // Same file
+                clone_a.file == clone_b.file
+                    // A's lines are within B's lines
+                    && clone_a.start_line >= clone_b.start_line
+                    && clone_a.end_line <= clone_b.end_line
+                    // A is smaller than B (not the same clone)
+                    && (clone_a.start_line > clone_b.start_line || clone_a.end_line < clone_b.end_line)
+            });
+
+            if !has_container {
+                return false;
+            }
+        }
+
+        true
     }
 }
 
