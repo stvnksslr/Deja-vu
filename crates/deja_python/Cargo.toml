@@ -15,5 +15,10 @@ anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 
-# Python parser
+# Python parser - RustPython for tokenization
 rustpython-parser = "0.3"
+
+# Ruff AST for AST-based detection
+ruff_python_ast = { git = "https://github.com/astral-sh/ruff", tag = "0.14.3" }
+ruff_python_parser = { git = "https://github.com/astral-sh/ruff", tag = "0.14.3" }
+ruff_text_size = { git = "https://github.com/astral-sh/ruff", tag = "0.14.3" }

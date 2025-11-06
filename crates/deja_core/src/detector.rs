@@ -20,8 +20,10 @@ pub enum DetectionMode {
 pub struct DetectionConfig {
     /// Detection mode (Fast, Balanced, or Precise)
     pub mode: DetectionMode,
-    /// Minimum number of tokens for a clone
+    /// Minimum number of tokens for a clone (used by token-based detector)
     pub min_tokens: usize,
+    /// Minimum number of AST nodes for a clone (used by AST-based detector)
+    pub min_nodes: usize,
     /// Minimum number of lines for a clone
     pub min_lines: usize,
     /// Similarity threshold (0.0 to 1.0)
@@ -37,6 +39,7 @@ impl Default for DetectionConfig {
         Self {
             mode: DetectionMode::Balanced,
             min_tokens: 20, // Lowered from 50 to detect small to medium duplicates (10-15 lines)
+            min_nodes: 10,  // Minimum AST nodes for balanced mode
             min_lines: 4,   // Lowered from 5 for better sensitivity
             similarity_threshold: 0.85,
             ignore_comments: true,
@@ -50,6 +53,7 @@ impl DetectionConfig {
         Self {
             mode: DetectionMode::Fast,
             min_tokens: 30, // Higher threshold for faster processing
+            min_nodes: 15,  // Not used in fast mode, but set for consistency
             min_lines: 5,
             ..Default::default()
         }
@@ -58,6 +62,7 @@ impl DetectionConfig {
     pub fn balanced() -> Self {
         Self {
             mode: DetectionMode::Balanced,
+            min_nodes: 10, // Moderate threshold for AST-based detection
             ..Default::default()
         }
     }
@@ -66,6 +71,7 @@ impl DetectionConfig {
         Self {
             mode: DetectionMode::Precise,
             min_tokens: 15, // Lower threshold for more precise detection
+            min_nodes: 8,   // Lower threshold for AST detection
             min_lines: 3,
             similarity_threshold: 0.80,
             ..Default::default()

@@ -3,14 +3,17 @@
 //! This crate provides the fundamental building blocks for code clone detection,
 //! including detection strategies, similarity metrics, and result structures.
 
+pub mod ast_detector;
 pub mod clone;
 pub mod detector;
 pub mod hash;
 pub mod similarity;
 pub mod token;
 pub mod token_detector;
+pub mod tree_edit_distance;
 pub mod utils;
 
+pub use ast_detector::{AstBasedDetector, LanguageParser};
 pub use clone::{Clone, CloneGroup, CloneType};
 pub use detector::{CloneDetector, DetectionConfig, DetectionMode};
 pub use similarity::SimilarityMetric;
