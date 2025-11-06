@@ -8,11 +8,15 @@ pub mod detector;
 pub mod hash;
 pub mod similarity;
 pub mod token;
+pub mod token_detector;
+pub mod utils;
 
 pub use clone::{Clone, CloneGroup, CloneType};
 pub use detector::{CloneDetector, DetectionConfig, DetectionMode};
 pub use similarity::SimilarityMetric;
-pub use token::Token;
+pub use token::{LanguageTokenizer, Token, TokenizationError};
+pub use token_detector::TokenBasedDetector;
+pub use utils::{collect_files, file_statistics, filter_by_language, FileStats};
 
 use std::path::PathBuf;
 

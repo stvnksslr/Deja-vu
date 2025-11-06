@@ -1,0 +1,282 @@
+//! Token-based clone detector implementation
+//!
+//! This module implements a fast token-based clone detection algorithm
+//! using rolling hashes and sliding windows.
+
+use crate::clone::{Clone, CloneGroup, CloneType};
+use crate::detector::{CloneDetector, DetectionConfig};
+use crate::hash::{hash_tokens, RollingHash};
+use crate::token::{LanguageTokenizer, Token, TokenSequence, TokenType};
+use crate::SourceFile;
+use anyhow::Result;
+use dashmap::DashMap;
+use rayon::prelude::*;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+/// Token-based clone detector for fast Type-1 and Type-2 clone detection
+pub struct TokenBasedDetector {
+    tokenizers: HashMap<String, Box<dyn LanguageTokenizer>>,
+}
+
+impl TokenBasedDetector {
+    pub fn new() -> Self {
+        Self {
+            tokenizers: HashMap::new(),
+        }
+    }
+
+    /// Register a tokenizer for a language
+    pub fn register_tokenizer(
+        &mut self,
+        language: String,
+        tokenizer: Box<dyn LanguageTokenizer>,
+    ) {
+        self.tokenizers.insert(language, tokenizer);
+    }
+
+    /// Tokenize a source file using a language-specific tokenizer
+    fn tokenize_file(&self, file: &SourceFile) -> Result<Vec<Token>> {
+        if let Some(tokenizer) = self.tokenizers.get(&file.language) {
+            tokenizer
+                .tokenize(&file.content)
+                .map_err(|e| anyhow::anyhow!("Tokenization failed: {}", e))
+        } else {
+            anyhow::bail!("No tokenizer registered for language: {}", file.language)
+        }
+    }
+
+    /// Normalize tokens for clone detection
+    fn normalize_tokens(&self, tokens: &[Token], config: &DetectionConfig) -> Vec<String> {
+        tokens
+            .iter()
+            .filter_map(|token| {
+                // Skip comments and whitespace if configured
+                if config.ignore_comments && matches!(token.token_type, TokenType::Comment) {
+                    return None;
+                }
+                if config.ignore_whitespace && matches!(token.token_type, TokenType::Whitespace) {
+                    return None;
+                }
+
+                // Normalize identifiers for Type-2 clone detection
+                let normalized = match token.token_type {
+                    TokenType::Identifier => "$ID".to_string(),
+                    TokenType::Literal => "$LIT".to_string(),
+                    TokenType::Comment | TokenType::Whitespace => return None,
+                    _ => token.value.clone(),
+                };
+
+                Some(normalized)
+            })
+            .collect()
+    }
+
+    /// Find clone candidates using rolling hash
+    fn find_candidates(
+        &self,
+        files: &[SourceFile],
+        config: &DetectionConfig,
+    ) -> Result<HashMap<u64, Vec<CloneCandidate>>> {
+        // Map from hash to list of locations with that hash
+        let hash_map: Arc<DashMap<u64, Vec<CloneCandidate>>> = Arc::new(DashMap::new());
+
+        // Process files in parallel
+        files.par_iter().try_for_each(|file| -> Result<()> {
+            // TODO: Get tokens from language-specific tokenizer
+            // For now, create a placeholder
+            let tokens = self.tokenize_file(file)?;
+
+            if tokens.is_empty() {
+                return Ok(());
+            }
+
+            let normalized = self.normalize_tokens(&tokens, config);
+
+            if normalized.len() < config.min_tokens {
+                return Ok(());
+            }
+
+            // Use rolling hash to find all windows
+            let mut roller = RollingHash::new(config.min_tokens);
+
+            for (i, token) in normalized.iter().enumerate() {
+                if let Some(hash) = roller.push(token) {
+                    let window_start = i.saturating_sub(config.min_tokens - 1);
+                    let window_end = i + 1;
+
+                    // Get the original token indices (before normalization)
+                    let start_token = &tokens[window_start];
+                    let end_token = &tokens[window_end - 1];
+
+                    let candidate = CloneCandidate {
+                        file_path: file.path.clone(),
+                        start_line: start_token.line,
+                        end_line: end_token.line,
+                        start_col: start_token.column,
+                        end_col: end_token.column,
+                        start_offset: start_token.start,
+                        end_offset: end_token.end,
+                        token_count: config.min_tokens,
+                    };
+
+                    hash_map.entry(hash).or_insert_with(Vec::new).push(candidate);
+                }
+            }
+
+            Ok(())
+        })?;
+
+        // Convert DashMap to HashMap
+        let result: HashMap<u64, Vec<CloneCandidate>> = hash_map
+            .into_iter()
+            .filter(|(_, candidates)| candidates.len() > 1) // Only keep hashes with multiple occurrences
+            .collect();
+
+        Ok(result)
+    }
+
+    /// Extend clone candidates to find full clone regions
+    fn extend_candidates(
+        &self,
+        candidates: HashMap<u64, Vec<CloneCandidate>>,
+        files: &[SourceFile],
+        config: &DetectionConfig,
+    ) -> Vec<CloneGroup> {
+        let mut groups = Vec::new();
+
+        for (hash, mut candidates) in candidates {
+            // Sort candidates by file and location for consistent processing
+            candidates.sort_by(|a, b| {
+                a.file_path
+                    .cmp(&b.file_path)
+                    .then(a.start_line.cmp(&b.start_line))
+            });
+
+            // Filter by minimum line count
+            candidates.retain(|c| (c.end_line - c.start_line + 1) >= config.min_lines);
+
+            if candidates.len() < 2 {
+                continue;
+            }
+
+            // Create a clone group
+            let mut group = CloneGroup::new(
+                CloneType::Type1, // Start with Type-1, could be refined
+                1.0,              // Perfect similarity for exact token matches
+                format!("{:x}", hash),
+            );
+
+            for candidate in candidates {
+                // Find the source file to extract content
+                if let Some(source_file) = files.iter().find(|f| f.path == candidate.file_path) {
+                    let content = self.extract_content(
+                        &source_file.content,
+                        candidate.start_offset,
+                        candidate.end_offset,
+                    );
+
+                    let clone = Clone::new(
+                        candidate.file_path.clone(),
+                        candidate.start_line,
+                        candidate.end_line,
+                        candidate.start_col,
+                        candidate.end_col,
+                        content,
+                    );
+
+                    group.add_instance(clone);
+                }
+            }
+
+            // Only keep groups with multiple instances
+            if group.size() >= 2 {
+                groups.push(group);
+            }
+        }
+
+        groups
+    }
+
+    /// Extract content from source between offsets
+    fn extract_content(&self, source: &str, start: usize, end: usize) -> String {
+        source
+            .get(start..end)
+            .unwrap_or("")
+            .to_string()
+    }
+}
+
+impl Default for TokenBasedDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CloneDetector for TokenBasedDetector {
+    fn detect(&self, files: &[SourceFile], config: &DetectionConfig) -> Result<Vec<CloneGroup>> {
+        // Step 1: Find clone candidates using rolling hash
+        let candidates = self.find_candidates(files, config)?;
+
+        // Step 2: Extend candidates to find full clone regions
+        let groups = self.extend_candidates(candidates, files, config);
+
+        Ok(groups)
+    }
+
+    fn name(&self) -> &str {
+        "Token-Based Detector"
+    }
+
+    fn description(&self) -> &str {
+        "Fast token-based clone detection using rolling hashes. Detects Type-1 and Type-2 clones."
+    }
+}
+
+/// A candidate clone location
+#[derive(Debug, Clone)]
+struct CloneCandidate {
+    file_path: std::path::PathBuf,
+    start_line: usize,
+    end_line: usize,
+    start_col: usize,
+    end_col: usize,
+    start_offset: usize,
+    end_offset: usize,
+    token_count: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_detector_creation() {
+        let detector = TokenBasedDetector::new();
+        assert_eq!(detector.name(), "Token-Based Detector");
+    }
+
+    #[test]
+    fn test_normalize_tokens() {
+        let detector = TokenBasedDetector::new();
+        let config = DetectionConfig::default();
+
+        let tokens = vec![
+            Token::new(TokenType::Keyword, "def".to_string(), 0, 3, 1, 0),
+            Token::new(TokenType::Identifier, "foo".to_string(), 4, 7, 1, 4),
+            Token::new(TokenType::Literal, "42".to_string(), 10, 12, 1, 10),
+        ];
+
+        let normalized = detector.normalize_tokens(&tokens, &config);
+        assert_eq!(normalized, vec!["def", "$ID", "$LIT"]);
+    }
+
+    #[test]
+    fn test_extract_content() {
+        let detector = TokenBasedDetector::new();
+        let source = "def foo():\n    return 42";
+        let content = detector.extract_content(source, 0, 10);
+        assert_eq!(content, "def foo():");
+    }
+}

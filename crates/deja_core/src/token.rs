@@ -95,6 +95,25 @@ impl TokenSequence {
     }
 }
 
+/// Trait for language-specific tokenizers
+pub trait LanguageTokenizer: Send + Sync {
+    /// Tokenize source code into tokens
+    fn tokenize(&self, source: &str) -> Result<Vec<Token>, TokenizationError>;
+
+    /// Get the language name
+    fn language(&self) -> &str;
+}
+
+/// Error during tokenization
+#[derive(Debug, thiserror::Error)]
+pub enum TokenizationError {
+    #[error("Lexical error: {0}")]
+    LexError(String),
+
+    #[error("Unsupported language: {0}")]
+    UnsupportedLanguage(String),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

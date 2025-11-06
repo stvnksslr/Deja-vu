@@ -4,9 +4,10 @@
 //! allowing it to be used as a Python library.
 
 use deja_core::clone::{Clone, CloneGroup, CloneType};
-use deja_core::detector::{DetectionConfig, DetectionMode};
-use deja_core::SourceFile;
-use pyo3::exceptions::PyValueError;
+use deja_core::detector::{CloneDetector, DetectionConfig, DetectionMode};
+use deja_core::{collect_files, TokenBasedDetector};
+use deja_python::PythonTokenizer;
+use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
 use std::path::PathBuf;
 
@@ -230,9 +231,26 @@ fn detect_clones(files: Vec<String>, config: Option<PyDetectionConfig>) -> PyRes
         config: DetectionConfig::default(),
     });
 
-    // TODO: Implement actual clone detection
-    // For now, return empty result
-    Ok(Vec::new())
+    // Convert string paths to PathBuf
+    let paths: Vec<PathBuf> = files.iter().map(|f| PathBuf::from(f)).collect();
+
+    // Collect Python files
+    let source_files = collect_files(&paths, &["py"])
+        .map_err(|e| PyIOError::new_err(format!("Failed to collect files: {}", e)))?;
+
+    // Create detector with Python tokenizer
+    let mut detector = TokenBasedDetector::new();
+    detector.register_tokenizer("python".to_string(), Box::new(PythonTokenizer::new()));
+
+    // Run detection
+    let clone_groups = detector
+        .detect(&source_files, &config.config)
+        .map_err(|e| PyValueError::new_err(format!("Detection failed: {}", e)))?;
+
+    // Convert to Python types
+    let py_groups: Vec<PyCloneGroup> = clone_groups.into_iter().map(|g| g.into()).collect();
+
+    Ok(py_groups)
 }
 
 /// Get the version of Deja-vu

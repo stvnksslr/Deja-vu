@@ -1,6 +1,6 @@
 //! Python tokenizer for token-based clone detection
 
-use deja_core::token::{Token, TokenType};
+use deja_core::token::{LanguageTokenizer, Token, TokenType, TokenizationError};
 use ruff_python_parser::lexer::{lex, LexResult, LexicalError};
 use ruff_python_parser::Mode;
 
@@ -13,7 +13,7 @@ impl PythonTokenizer {
     }
 
     /// Tokenize Python source code
-    pub fn tokenize(&self, source: &str) -> Result<Vec<Token>, TokenizationError> {
+    fn tokenize_python(&self, source: &str) -> Result<Vec<Token>, TokenizationError> {
         let tokens: Vec<LexResult> = lex(source, Mode::Module).collect();
 
         let mut result = Vec::new();
@@ -107,11 +107,14 @@ impl Default for PythonTokenizer {
     }
 }
 
-/// Tokenization error
-#[derive(Debug, thiserror::Error)]
-pub enum TokenizationError {
-    #[error("Lexical error: {0}")]
-    LexError(String),
+impl LanguageTokenizer for PythonTokenizer {
+    fn tokenize(&self, source: &str) -> Result<Vec<Token>, TokenizationError> {
+        self.tokenize_python(source)
+    }
+
+    fn language(&self) -> &str {
+        "python"
+    }
 }
 
 #[cfg(test)]
@@ -123,7 +126,7 @@ mod tests {
         let tokenizer = PythonTokenizer::new();
         let source = "def hello():\n    pass";
 
-        let result = tokenizer.tokenize(source);
+        let result = tokenizer.tokenize_python(source);
         assert!(result.is_ok());
 
         let tokens = result.unwrap();
@@ -139,7 +142,7 @@ mod tests {
         let tokenizer = PythonTokenizer::new();
         let source = r#"x = 42"#;
 
-        let result = tokenizer.tokenize(source);
+        let result = tokenizer.tokenize_python(source);
         assert!(result.is_ok());
 
         let tokens = result.unwrap();
