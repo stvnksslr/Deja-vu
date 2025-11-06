@@ -177,6 +177,8 @@ impl AstBasedDetector {
             eprintln!("  Warning: {} files failed to parse and were skipped", parse_errors);
         }
 
+        eprintln!("  Extracting subtrees from {} files...", parsed_files.len());
+
         // Extract all subtrees
         let min_nodes = config.min_nodes;
         let all_subtrees: Vec<(usize, SubtreeInfo)> = parsed_files
@@ -188,6 +190,8 @@ impl AstBasedDetector {
                     .map(move |st| (file_idx, st))
             })
             .collect();
+
+        eprintln!("  Found {} subtrees, grouping by similarity...", all_subtrees.len());
 
         // Group subtrees by hash for candidate pairs
         let hash_map: Arc<DashMap<u64, Vec<(usize, SubtreeInfo)>>> = Arc::new(DashMap::new());
@@ -219,6 +223,10 @@ impl AstBasedDetector {
                     }
                 }
             }
+        }
+
+        if !candidates.is_empty() {
+            eprintln!("  Comparing {} candidate pairs with tree edit distance...", candidates.len());
         }
 
         Ok((candidates, parsed_files))
