@@ -30,7 +30,7 @@ Deja-vu is a high-performance code duplication detection tool written in Rust wi
 
 ### Language Support
 
-- ✅ Python (via Ruff's Python parser)
+- ✅ Python (via RustPython parser)
 - 🔜 JavaScript/TypeScript (planned)
 - 🔜 Rust (planned)
 - 🔜 Java (planned)

@@ -1,9 +1,7 @@
-//! Python AST parser using Ruff's Python parser
+//! Python AST parser using RustPython's parser
 
 use deja_ast::{Ast, AstError, AstNode, NodeKind, Span, ToGenericAst};
-use ruff_python_ast::Mod;
-use ruff_python_parser::{parse, Mode};
-use ruff_text_size::TextSize;
+use rustpython_parser::{parse, Mode};
 
 /// Python language parser
 pub struct PythonParser;
@@ -23,29 +21,23 @@ impl PythonParser {
 
     fn convert_to_generic_ast(
         &self,
-        module: Mod,
+        module: rustpython_parser::ast::Suite,
         _source: &str,
         filename: &str,
     ) -> Result<Ast, AstError> {
         let mut ast = Ast::new(filename.to_string());
 
-        match module {
-            Mod::Module(mod_ast) => {
-                let root_span = Span::new(0, 0, 0, 0, 0, 0);
-                let root_node = AstNode::new(0, NodeKind::Module, root_span);
-                ast.add_node(root_node);
-                ast.root = 0;
+        // Create root module node
+        let root_span = Span::new(0, 0, 0, 0, 0, 0);
+        let root_node = AstNode::new(0, NodeKind::Module, root_span);
+        ast.add_node(root_node);
+        ast.root = 0;
 
-                // TODO: Walk the Python AST and convert to generic AST
-                // This is a simplified implementation - full implementation would
-                // recursively process all statements and expressions
+        // TODO: Walk the Python AST and convert to generic AST
+        // This is a simplified implementation - full implementation would
+        // recursively process all statements and expressions
 
-                Ok(ast)
-            }
-            Mod::Expression(_) => {
-                Err(AstError::UnsupportedNode("Expression mode not supported".to_string()))
-            }
-        }
+        Ok(ast)
     }
 }
 
