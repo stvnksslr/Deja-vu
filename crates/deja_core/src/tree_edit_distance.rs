@@ -191,17 +191,24 @@ fn nodes_match(node1: &AstNode, node2: &AstNode) -> bool {
     }
 }
 
-/// Count total number of nodes in a subtree
+/// Count total number of nodes in a subtree (iterative to avoid stack overflow)
 fn count_nodes(ast: &Ast, node_id: usize) -> usize {
-    let node = match ast.get_node(node_id) {
-        Some(n) => n,
-        None => return 0,
-    };
+    let mut count = 0;
+    let mut stack = vec![node_id];
+    const MAX_NODES_TO_COUNT: usize = 1000; // Safety limit
 
-    let mut count = 1; // Count this node
+    while let Some(current_id) = stack.pop() {
+        if count >= MAX_NODES_TO_COUNT {
+            return MAX_NODES_TO_COUNT; // Return limit if exceeded
+        }
 
-    for &child_id in &node.children {
-        count += count_nodes(ast, child_id);
+        if let Some(node) = ast.get_node(current_id) {
+            count += 1;
+            // Add all children to stack
+            for &child_id in &node.children {
+                stack.push(child_id);
+            }
+        }
     }
 
     count

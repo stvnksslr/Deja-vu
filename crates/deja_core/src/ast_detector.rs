@@ -51,9 +51,23 @@ impl AstBasedDetector {
     fn extract_subtrees(&self, ast: &Ast, min_nodes: usize) -> Vec<SubtreeInfo> {
         let mut subtrees = Vec::new();
         const MAX_SUBTREE_SIZE: usize = 500; // Prevent comparing huge subtrees
+        const MAX_SUBTREES_PER_FILE: usize = 100; // Limit subtrees per file
 
-        // Walk the AST and extract subtrees that are large enough
+        // Only look at function and class nodes, not every node
+        // This dramatically reduces the number of comparisons
         for node in &ast.nodes {
+            // Only extract subtrees for meaningful node types
+            if !matches!(
+                node.kind,
+                deja_ast::NodeKind::Function | deja_ast::NodeKind::Class | deja_ast::NodeKind::Method
+            ) {
+                continue;
+            }
+
+            if subtrees.len() >= MAX_SUBTREES_PER_FILE {
+                break; // Stop if we have too many subtrees
+            }
+
             let size = count_subtree_nodes(ast, node.id);
 
             // Only include subtrees above minimum size and below maximum size
@@ -344,16 +358,24 @@ struct ClonePair {
     similarity: f64,
 }
 
-/// Count nodes in a subtree
+/// Count nodes in a subtree (iterative to avoid stack overflow)
 fn count_subtree_nodes(ast: &Ast, node_id: usize) -> usize {
-    let node = match ast.get_node(node_id) {
-        Some(n) => n,
-        None => return 0,
-    };
+    let mut count = 0;
+    let mut stack = vec![node_id];
+    const MAX_NODES_TO_COUNT: usize = 1000; // Safety limit
 
-    let mut count = 1;
-    for &child_id in &node.children {
-        count += count_subtree_nodes(ast, child_id);
+    while let Some(current_id) = stack.pop() {
+        if count >= MAX_NODES_TO_COUNT {
+            return MAX_NODES_TO_COUNT; // Return limit if exceeded
+        }
+
+        if let Some(node) = ast.get_node(current_id) {
+            count += 1;
+            // Add all children to stack
+            for &child_id in &node.children {
+                stack.push(child_id);
+            }
+        }
     }
 
     count
