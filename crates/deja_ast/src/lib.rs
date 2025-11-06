@@ -223,11 +223,13 @@ impl Ast {
     }
 
     pub fn get_node(&self, id: NodeId) -> Option<&AstNode> {
-        self.nodes.get(id)
+        // Search for node by ID, not by index
+        self.nodes.iter().find(|node| node.id == id)
     }
 
     pub fn get_node_mut(&mut self, id: NodeId) -> Option<&mut AstNode> {
-        self.nodes.get_mut(id)
+        // Search for node by ID, not by index
+        self.nodes.iter_mut().find(|node| node.id == id)
     }
 }
 
