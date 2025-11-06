@@ -86,7 +86,7 @@ impl AstBasedDetector {
                 eprintln!(
                     "    Skipping {:?} '{}' (size {} < min {})",
                     node.kind,
-                    node.name.as_deref().unwrap_or("unnamed"),
+                    node.text.as_deref().unwrap_or("unnamed"),
                     size,
                     effective_min_nodes
                 );
