@@ -56,6 +56,11 @@ impl AstBasedDetector {
         // Enforce reasonable minimum to prevent memory exhaustion
         let effective_min_nodes = min_nodes.max(5);
 
+        let mut function_count = 0;
+        let mut too_small_count = 0;
+        let mut too_large_count = 0;
+        let mut trivial_count = 0;
+
         // Only look at function and class nodes, not every node
         // This dramatically reduces the number of comparisons
         for node in &ast.nodes {
@@ -67,6 +72,8 @@ impl AstBasedDetector {
                 continue;
             }
 
+            function_count += 1;
+
             if subtrees.len() >= MAX_SUBTREES_PER_FILE {
                 break; // Stop if we have too many subtrees
             }
@@ -74,16 +81,45 @@ impl AstBasedDetector {
             let size = count_subtree_nodes(ast, node.id);
 
             // Only include subtrees above minimum size and below maximum size
-            if size >= effective_min_nodes && size <= MAX_SUBTREE_SIZE {
-                // Skip trivial nodes that are likely boilerplate
-                if !self.is_trivial_subtree(ast, node.id) {
-                    subtrees.push(SubtreeInfo {
-                        root_id: node.id,
-                        size,
-                        hash: self.hash_subtree(ast, node.id),
-                    });
-                }
+            if size < effective_min_nodes {
+                too_small_count += 1;
+                eprintln!(
+                    "    Skipping {:?} '{}' (size {} < min {})",
+                    node.kind,
+                    node.name.as_deref().unwrap_or("unnamed"),
+                    size,
+                    effective_min_nodes
+                );
+                continue;
             }
+
+            if size > MAX_SUBTREE_SIZE {
+                too_large_count += 1;
+                continue;
+            }
+
+            // Skip trivial nodes that are likely boilerplate
+            if self.is_trivial_subtree(ast, node.id) {
+                trivial_count += 1;
+                continue;
+            }
+
+            subtrees.push(SubtreeInfo {
+                root_id: node.id,
+                size,
+                hash: self.hash_subtree(ast, node.id),
+            });
+        }
+
+        if function_count > 0 {
+            eprintln!(
+                "    Found {} functions/classes: {} extracted, {} too small, {} too large, {} trivial",
+                function_count,
+                subtrees.len(),
+                too_small_count,
+                too_large_count,
+                trivial_count
+            );
         }
 
         subtrees
