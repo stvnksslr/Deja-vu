@@ -111,7 +111,11 @@ impl AstBasedDetector {
         }
     }
 
-    /// Create a structural hash of a subtree for candidate filtering
+    /// Create a coarse-grained structural hash of a subtree for candidate filtering
+    ///
+    /// This hash groups similar code together for comparison, rather than requiring
+    /// exact structural matches. We only hash high-level features like node type
+    /// and approximate size, so similar functions get grouped together.
     fn hash_subtree(&self, ast: &Ast, node_id: usize) -> u64 {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
@@ -123,16 +127,14 @@ impl AstBasedDetector {
 
         let mut hasher = DefaultHasher::new();
 
-        // Hash the node kind
+        // Hash the node kind (Function, Class, Method)
         format!("{:?}", node.kind).hash(&mut hasher);
 
-        // Hash children recursively (limited depth for performance)
-        for (i, &child_id) in node.children.iter().enumerate() {
-            if i < 5 {
-                // Limit to first 5 children for hashing
-                self.hash_subtree(ast, child_id).hash(&mut hasher);
-            }
-        }
+        // Hash approximate size (bucketed to group similar-sized code)
+        // Dividing by 5 means functions with 10-14 nodes get same bucket
+        let size = count_subtree_nodes(ast, node_id);
+        let size_bucket = size / 5;
+        size_bucket.hash(&mut hasher);
 
         hasher.finish()
     }
@@ -150,10 +152,23 @@ impl AstBasedDetector {
             .filter_map(|file| {
                 match self.parse_file(file) {
                     Ok(ast) => Some((file.clone(), ast)),
-                    Err(_) => None, // Skip files that fail to parse
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: Failed to parse {}: {}",
+                            file.path.display(),
+                            e
+                        );
+                        None
+                    }
                 }
             })
             .collect();
+
+        let parse_errors = files.len() - parsed_files.len();
+        eprintln!("  Parsed {}/{} files successfully", parsed_files.len(), files.len());
+        if parse_errors > 0 {
+            eprintln!("  {} files failed to parse and were skipped", parse_errors);
+        }
 
         // Extract all subtrees
         let min_nodes = config.min_nodes;
@@ -167,6 +182,8 @@ impl AstBasedDetector {
             })
             .collect();
 
+        eprintln!("  Extracted {} subtrees from parsed files", all_subtrees.len());
+
         // Group subtrees by hash for candidate pairs
         let hash_map: Arc<DashMap<u64, Vec<(usize, SubtreeInfo)>>> = Arc::new(DashMap::new());
 
@@ -176,6 +193,8 @@ impl AstBasedDetector {
                 .or_insert_with(Vec::new)
                 .push((file_idx, subtree));
         }
+
+        eprintln!("  Grouped into {} unique hash buckets", hash_map.len());
 
         // Create candidate pairs from hash groups
         let mut candidates = Vec::new();
@@ -198,6 +217,8 @@ impl AstBasedDetector {
                 }
             }
         }
+
+        eprintln!("  Generated {} candidate pairs for comparison", candidates.len());
 
         Ok((candidates, parsed_files))
     }
