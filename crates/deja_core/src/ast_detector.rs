@@ -80,6 +80,18 @@ impl AstBasedDetector {
 
             let size = count_subtree_nodes(ast, node.id);
 
+            // Debug: Show node details
+            if function_count <= 3 {
+                eprintln!(
+                    "    DEBUG: {:?} '{}' id={} has {} children, counted size={}",
+                    node.kind,
+                    node.text.as_deref().unwrap_or("unnamed"),
+                    node.id,
+                    node.children.len(),
+                    size
+                );
+            }
+
             // Only include subtrees above minimum size and below maximum size
             if size < effective_min_nodes {
                 too_small_count += 1;
@@ -436,6 +448,9 @@ fn count_subtree_nodes(ast: &Ast, node_id: usize) -> usize {
             for &child_id in &node.children {
                 stack.push(child_id);
             }
+        } else {
+            // DEBUG: Node not found
+            eprintln!("    DEBUG count_subtree_nodes: node {} not found in AST!", current_id);
         }
     }
 
