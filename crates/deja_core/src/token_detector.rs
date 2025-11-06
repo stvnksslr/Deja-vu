@@ -249,7 +249,47 @@ struct CloneCandidate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::token::{LanguageTokenizer, TokenizationError};
     use std::path::PathBuf;
+
+    // Mock tokenizer for testing
+    struct MockTokenizer;
+
+    impl LanguageTokenizer for MockTokenizer {
+        fn tokenize(&self, source: &str) -> Result<Vec<Token>, TokenizationError> {
+            // Simple mock tokenizer that splits on whitespace
+            let mut tokens = Vec::new();
+            let mut offset = 0;
+            let mut line = 1;
+            let mut col = 0;
+
+            for word in source.split_whitespace() {
+                let token_type = match word {
+                    "def" | "class" | "if" | "else" | "return" => TokenType::Keyword,
+                    _ if word.chars().all(|c| c.is_numeric()) => TokenType::Literal,
+                    _ => TokenType::Identifier,
+                };
+
+                tokens.push(Token::new(
+                    token_type,
+                    word.to_string(),
+                    offset,
+                    offset + word.len(),
+                    line,
+                    col,
+                ));
+
+                offset += word.len() + 1; // +1 for space
+                col += word.len() + 1;
+            }
+
+            Ok(tokens)
+        }
+
+        fn language(&self) -> &str {
+            "mock"
+        }
+    }
 
     #[test]
     fn test_detector_creation() {
@@ -273,10 +313,175 @@ mod tests {
     }
 
     #[test]
+    fn test_normalize_tokens_with_comments() {
+        let detector = TokenBasedDetector::new();
+        let mut config = DetectionConfig::default();
+        config.ignore_comments = true;
+
+        let tokens = vec![
+            Token::new(TokenType::Keyword, "def".to_string(), 0, 3, 1, 0),
+            Token::new(TokenType::Comment, "# comment".to_string(), 4, 13, 1, 4),
+            Token::new(TokenType::Identifier, "foo".to_string(), 14, 17, 1, 14),
+        ];
+
+        let normalized = detector.normalize_tokens(&tokens, &config);
+        assert_eq!(normalized, vec!["def", "$ID"]);
+    }
+
+    #[test]
+    fn test_normalize_tokens_with_whitespace() {
+        let detector = TokenBasedDetector::new();
+        let mut config = DetectionConfig::default();
+        config.ignore_whitespace = true;
+
+        let tokens = vec![
+            Token::new(TokenType::Keyword, "def".to_string(), 0, 3, 1, 0),
+            Token::new(TokenType::Whitespace, "\n".to_string(), 3, 4, 1, 3),
+            Token::new(TokenType::Identifier, "foo".to_string(), 4, 7, 2, 0),
+        ];
+
+        let normalized = detector.normalize_tokens(&tokens, &config);
+        assert_eq!(normalized, vec!["def", "$ID"]);
+    }
+
+    #[test]
     fn test_extract_content() {
         let detector = TokenBasedDetector::new();
         let source = "def foo():\n    return 42";
         let content = detector.extract_content(source, 0, 10);
         assert_eq!(content, "def foo():");
+    }
+
+    #[test]
+    fn test_extract_content_out_of_bounds() {
+        let detector = TokenBasedDetector::new();
+        let source = "short";
+        let content = detector.extract_content(source, 0, 100);
+        assert_eq!(content, "");
+    }
+
+    #[test]
+    fn test_register_tokenizer() {
+        let mut detector = TokenBasedDetector::new();
+        detector.register_tokenizer("test".to_string(), Box::new(MockTokenizer));
+
+        // Verify tokenizer was registered by trying to use it
+        let source = SourceFile::new(
+            PathBuf::from("test.mock"),
+            "def foo bar".to_string(),
+            "test".to_string(),
+        );
+
+        let result = detector.tokenize_file(&source);
+        assert!(result.is_ok());
+        let tokens = result.unwrap();
+        assert_eq!(tokens.len(), 3);
+    }
+
+    #[test]
+    fn test_tokenize_file_no_tokenizer() {
+        let detector = TokenBasedDetector::new();
+        let source = SourceFile::new(
+            PathBuf::from("test.unknown"),
+            "content".to_string(),
+            "unknown".to_string(),
+        );
+
+        let result = detector.tokenize_file(&source);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No tokenizer"));
+    }
+
+    #[test]
+    fn test_detect_empty_files() {
+        let detector = TokenBasedDetector::new();
+        let config = DetectionConfig::default();
+        let files: Vec<SourceFile> = vec![];
+
+        let result = detector.detect(&files, &config);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_detect_single_file() {
+        let mut detector = TokenBasedDetector::new();
+        detector.register_tokenizer("mock".to_string(), Box::new(MockTokenizer));
+
+        let config = DetectionConfig {
+            mode: DetectionMode::Fast,
+            min_tokens: 3,
+            min_lines: 1,
+            similarity_threshold: 0.8,
+            ignore_comments: true,
+            ignore_whitespace: true,
+        };
+
+        let files = vec![SourceFile::new(
+            PathBuf::from("test1.mock"),
+            "def foo bar baz qux".to_string(),
+            "mock".to_string(),
+        )];
+
+        let result = detector.detect(&files, &config);
+        assert!(result.is_ok());
+        // Single file should not produce clones
+        assert_eq!(result.unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_detect_identical_code() {
+        let mut detector = TokenBasedDetector::new();
+        detector.register_tokenizer("mock".to_string(), Box::new(MockTokenizer));
+
+        let config = DetectionConfig {
+            mode: DetectionMode::Fast,
+            min_tokens: 3,
+            min_lines: 1,
+            similarity_threshold: 0.8,
+            ignore_comments: true,
+            ignore_whitespace: true,
+        };
+
+        let code = "def foo bar baz qux".to_string();
+        let files = vec![
+            SourceFile::new(PathBuf::from("test1.mock"), code.clone(), "mock".to_string()),
+            SourceFile::new(PathBuf::from("test2.mock"), code.clone(), "mock".to_string()),
+        ];
+
+        let result = detector.detect(&files, &config);
+        assert!(result.is_ok());
+        let groups = result.unwrap();
+
+        // Should find at least one clone group with the identical code
+        assert!(groups.len() > 0, "Should detect clones in identical code");
+    }
+
+    #[test]
+    fn test_detect_respects_min_tokens() {
+        let mut detector = TokenBasedDetector::new();
+        detector.register_tokenizer("mock".to_string(), Box::new(MockTokenizer));
+
+        let config = DetectionConfig {
+            mode: DetectionMode::Fast,
+            min_tokens: 100, // Very high threshold
+            min_lines: 1,
+            similarity_threshold: 0.8,
+            ignore_comments: true,
+            ignore_whitespace: true,
+        };
+
+        let code = "def foo bar".to_string();
+        let files = vec![
+            SourceFile::new(PathBuf::from("test1.mock"), code.clone(), "mock".to_string()),
+            SourceFile::new(PathBuf::from("test2.mock"), code.clone(), "mock".to_string()),
+        ];
+
+        let result = detector.detect(&files, &config);
+        assert!(result.is_ok());
+        let groups = result.unwrap();
+
+        // Should not find clones because code is too short
+        assert_eq!(groups.len(), 0);
     }
 }

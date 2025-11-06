@@ -104,6 +104,47 @@ mod tests {
     }
 
     #[test]
+    fn test_hash_tokens_empty() {
+        let tokens: Vec<String> = vec![];
+        let hash = hash_tokens(&tokens);
+        // Empty should produce consistent hash
+        assert_eq!(hash, hash_tokens(&tokens));
+    }
+
+    #[test]
+    fn test_hash_tokens_order_matters() {
+        let tokens1 = vec!["foo".to_string(), "bar".to_string()];
+        let tokens2 = vec!["bar".to_string(), "foo".to_string()];
+
+        // Different order should produce different hash
+        assert_ne!(hash_tokens(&tokens1), hash_tokens(&tokens2));
+    }
+
+    #[test]
+    fn test_hash_tokens_deterministic() {
+        let tokens = vec!["def".to_string(), "foo".to_string(), "bar".to_string()];
+
+        let hash1 = hash_tokens(&tokens);
+        let hash2 = hash_tokens(&tokens);
+        let hash3 = hash_tokens(&tokens);
+
+        assert_eq!(hash1, hash2);
+        assert_eq!(hash2, hash3);
+    }
+
+    #[test]
+    fn test_rolling_hash_window_size_1() {
+        let mut roller = RollingHash::new(1);
+
+        let hash1 = roller.push("token1");
+        assert!(hash1.is_some());
+
+        let hash2 = roller.push("token2");
+        assert!(hash2.is_some());
+        assert_ne!(hash1, hash2);
+    }
+
+    #[test]
     fn test_rolling_hash() {
         let mut roller = RollingHash::new(3);
 
@@ -115,5 +156,119 @@ mod tests {
         let hash2 = roller.push("baz");
         assert!(hash2.is_some());
         assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_rolling_hash_same_sequence() {
+        let mut roller1 = RollingHash::new(3);
+        let mut roller2 = RollingHash::new(3);
+
+        let sequence = vec!["def", "foo", "bar", "baz"];
+
+        let mut hashes1 = Vec::new();
+        let mut hashes2 = Vec::new();
+
+        for token in &sequence {
+            if let Some(hash) = roller1.push(token) {
+                hashes1.push(hash);
+            }
+            if let Some(hash) = roller2.push(token) {
+                hashes2.push(hash);
+            }
+        }
+
+        assert_eq!(hashes1, hashes2, "Same sequence should produce same hashes");
+    }
+
+    #[test]
+    fn test_rolling_hash_reset() {
+        let mut roller = RollingHash::new(3);
+
+        roller.push("def");
+        roller.push("foo");
+        let hash1 = roller.push("bar");
+
+        roller.reset();
+
+        roller.push("def");
+        roller.push("foo");
+        let hash2 = roller.push("bar");
+
+        assert_eq!(hash1, hash2, "Reset should allow recomputing same hash");
+    }
+
+    #[test]
+    fn test_rolling_hash_sliding_window() {
+        let mut roller = RollingHash::new(3);
+
+        // Build initial window: [A, B, C]
+        roller.push("A");
+        roller.push("B");
+        let hash_abc = roller.push("C");
+
+        // Slide to: [B, C, D]
+        let hash_bcd = roller.push("D");
+
+        // Slide to: [C, D, E]
+        let hash_cde = roller.push("E");
+
+        assert!(hash_abc.is_some());
+        assert!(hash_bcd.is_some());
+        assert!(hash_cde.is_some());
+
+        // All should be different
+        assert_ne!(hash_abc, hash_bcd);
+        assert_ne!(hash_bcd, hash_cde);
+        assert_ne!(hash_abc, hash_cde);
+    }
+
+    #[test]
+    fn test_rolling_hash_repeated_pattern() {
+        let mut roller = RollingHash::new(2);
+
+        let hash1 = roller.push("X");
+        let hash2 = roller.push("Y");
+        let hash3 = roller.push("X");
+        let hash4 = roller.push("Y");
+
+        // [X, Y] and [X, Y] should produce same hash
+        assert_eq!(hash2, hash4);
+    }
+
+    #[test]
+    fn test_rolling_hash_large_window() {
+        let mut roller = RollingHash::new(10);
+
+        for i in 0..9 {
+            assert!(roller.push(&format!("token{}", i)).is_none());
+        }
+
+        let hash = roller.push("token9");
+        assert!(hash.is_some(), "Should produce hash after filling window");
+    }
+
+    #[test]
+    fn test_rolling_hash_special_characters() {
+        let mut roller = RollingHash::new(2);
+
+        roller.push("@#$");
+        let hash1 = roller.push("!%^");
+
+        roller.reset();
+
+        roller.push("@#$");
+        let hash2 = roller.push("!%^");
+
+        assert_eq!(hash1, hash2, "Should handle special characters consistently");
+    }
+
+    #[test]
+    fn test_rolling_hash_unicode() {
+        let mut roller = RollingHash::new(2);
+
+        roller.push("你好");
+        let hash = roller.push("世界");
+
+        assert!(hash.is_some(), "Should handle Unicode characters");
     }
 }
