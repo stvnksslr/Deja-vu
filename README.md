@@ -2,7 +2,9 @@
 
 An extremely fast code duplication detector, inspired by [Ruff](https://github.com/astral-sh/ruff).
 
-> **Status**: 🚧 Early Development - Core architecture in place, detection algorithms in progress
+> **Status**: ✅ Phase 1 Complete (85%+ complete) - Token-based detection working, JSON/SARIF output implemented
+>
+> **Ready for**: Testing on real codebases, feedback on threshold calibration, CI/CD integration
 
 ## Overview
 
@@ -17,9 +19,15 @@ Deja-vu is a high-performance code duplication detection tool written in Rust wi
 
 ### Detection Modes
 
-- **Fast**: Token-based detection for Type-1 and Type-2 clones
-- **Balanced**: AST-based detection for Type-1, Type-2, and Type-3 clones
-- **Precise**: Graph-based detection including Type-4 clones (planned)
+- **Fast**: Token-based detection for Type-1 and Type-2 clones (min-tokens: 30, min-lines: 5)
+- **Balanced**: Token-based detection optimized for general use (min-tokens: 20, min-lines: 4) - **Default**
+- **Precise**: Token-based detection for smaller duplicates (min-tokens: 15, min-lines: 3)
+
+### Output Formats
+
+- **Text**: Human-readable colored terminal output with clone locations and statistics
+- **JSON**: Structured output with metadata, configuration, summary stats, and clone details
+- **SARIF**: SARIF 2.1.0 format for integration with IDEs (VS Code, IntelliJ) and CI/CD tools (GitHub, GitLab)
 
 ### Clone Types
 
@@ -63,22 +71,54 @@ pip install deja-vu
 ### CLI
 
 ```bash
-# Basic usage
+# Basic usage (uses balanced mode with default thresholds)
 deja check /path/to/code
 
-# With options
+# With detection mode presets
+deja check /path/to/code --mode fast      # min-tokens: 30, min-lines: 5
+deja check /path/to/code --mode balanced  # min-tokens: 20, min-lines: 4 (default)
+deja check /path/to/code --mode precise   # min-tokens: 15, min-lines: 3
+
+# Custom thresholds (for fine-tuning)
 deja check /path/to/code \
-  --mode balanced \
-  --min-lines 5 \
-  --min-tokens 50 \
+  --min-lines 4 \
+  --min-tokens 20 \
   --threshold 0.85
 
+# Output formats
+deja check /path/to/code --format text    # Human-readable text (default)
+deja check /path/to/code --format json    # Structured JSON output
+deja check /path/to/code --format sarif   # SARIF 2.1.0 for IDE/CI integration
+
+# Report customization
+deja check /path/to/code --summary-only              # Show only statistics
+deja check /path/to/code --max-groups 5              # Limit displayed groups
+deja check /path/to/code --show-code                 # Show code snippets
+deja check /path/to/code --verbose                   # Detailed output with code
+deja check /path/to/code --exclude-tests             # Skip test files
+
 # Check multiple paths
-deja check src/ tests/ --verbose
+deja check src/ lib/ --verbose
 
 # Version information
 deja version
 ```
+
+### Threshold Recommendations
+
+Detection sensitivity depends on the size of code you want to detect:
+
+| Code Size | Recommended Mode | min-tokens | min-lines | Use Case |
+|-----------|------------------|------------|-----------|----------|
+| Small functions (5-10 lines) | `precise` | 15 | 3 | Aggressive deduplication |
+| Medium functions (10-20 lines) | `balanced` | 20 | 4 | General purpose (default) |
+| Large functions (20+ lines) | `fast` | 30 | 5 | Fast scanning, fewer false positives |
+
+### Exit Codes
+
+- `0`: No duplicates found (success)
+- `1`: Duplicates detected
+- `2`: Error occurred during analysis
 
 ### Python API
 
@@ -180,35 +220,6 @@ cargo fmt
 # Run clippy
 cargo clippy --all-targets --all-features
 ```
-
-## Roadmap
-
-### Phase 1: MVP (Current)
-- [x] Project structure and architecture
-- [x] Core abstractions (AST, tokens, clones)
-- [x] Python language support foundation
-- [x] CLI skeleton
-- [x] Python bindings skeleton
-- [ ] Token-based detection (Fast mode)
-- [ ] Basic reporting
-
-### Phase 2: Enhanced Detection
-- [ ] AST-based detection (Balanced mode)
-- [ ] Similarity metrics refinement
-- [ ] Configuration file support (deja.toml)
-- [ ] JSON/SARIF output formats
-
-### Phase 3: Multi-Language
-- [ ] Tree-sitter integration
-- [ ] JavaScript/TypeScript support
-- [ ] Rust support
-- [ ] Java support
-
-### Phase 4: Advanced Features
-- [ ] Graph-based detection (Precise mode)
-- [ ] IDE integrations (LSP)
-- [ ] Auto-fix suggestions
-- [ ] Incremental analysis
 
 ## Benchmarks
 

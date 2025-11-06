@@ -226,13 +226,16 @@ impl PyCloneGroup {
 /// Detect code clones in the given files
 #[pyfunction]
 #[pyo3(signature = (files, config=None))]
-fn detect_clones(files: Vec<String>, config: Option<PyDetectionConfig>) -> PyResult<Vec<PyCloneGroup>> {
+fn detect_clones(
+    files: Vec<String>,
+    config: Option<PyDetectionConfig>,
+) -> PyResult<Vec<PyCloneGroup>> {
     let config = config.unwrap_or_else(|| PyDetectionConfig {
         config: DetectionConfig::default(),
     });
 
     // Convert string paths to PathBuf
-    let paths: Vec<PathBuf> = files.iter().map(|f| PathBuf::from(f)).collect();
+    let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
 
     // Collect Python files (don't exclude tests by default for Python API)
     let source_files = collect_files(&paths, &["py"], false)

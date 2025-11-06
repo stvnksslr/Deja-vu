@@ -1,5 +1,7 @@
 //! Check command implementation
 
+use crate::output::JsonOutput;
+use crate::sarif::SarifReport;
 use anyhow::Result;
 use colored::*;
 use deja_core::{
@@ -8,8 +10,8 @@ use deja_core::{
 };
 use deja_python::PythonTokenizer;
 use std::path::PathBuf;
+use std::process;
 use std::time::Instant;
-use serde_json;
 
 pub fn run(
     paths: Vec<PathBuf>,
@@ -20,8 +22,13 @@ pub fn run(
     format: &str,
     verbose: bool,
     exclude_tests: bool,
+    max_groups: usize,
+    summary_only: bool,
 ) -> Result<()> {
-    println!("{}", "Deja-vu: Code Duplication Detector".bright_blue().bold());
+    println!(
+        "{}",
+        "Deja-vu: Code Duplication Detector".bright_blue().bold()
+    );
     println!();
 
     // Parse detection mode
@@ -30,7 +37,11 @@ pub fn run(
         "balanced" => DetectionMode::Balanced,
         "precise" => DetectionMode::Precise,
         _ => {
-            eprintln!("{} Invalid mode '{}', using 'balanced'", "Warning:".yellow(), mode);
+            eprintln!(
+                "{} Invalid mode '{}', using 'balanced'",
+                "Warning:".yellow(),
+                mode
+            );
             DetectionMode::Balanced
         }
     };
@@ -81,6 +92,7 @@ pub fn run(
     let detect_start = Instant::now();
 
     let clone_groups = detector.detect(&files, &config)?;
+    let has_clones = !clone_groups.is_empty();
 
     let duration = detect_start.elapsed();
 
@@ -97,61 +109,105 @@ pub fn run(
         );
         println!();
 
-        for (i, group) in clone_groups.iter().enumerate() {
-            println!(
-                "Clone Group #{} ({}, similarity: {:.1}%)",
-                i + 1,
-                group.clone_type.as_str(),
-                group.similarity * 100.0
-            );
-            println!("  {} instances, avg {} lines", group.size(), group.avg_lines() as usize);
+        if !summary_only {
+            // Determine how many groups to display
+            let display_limit = if max_groups == 0 {
+                clone_groups.len()
+            } else {
+                max_groups.min(clone_groups.len())
+            };
 
-            for instance in &group.instances {
+            for (i, group) in clone_groups.iter().enumerate().take(display_limit) {
                 println!(
-                    "    {}:{}:{}-{}:{}",
-                    instance.file.display().to_string().cyan(),
-                    instance.start_line,
-                    instance.start_col,
-                    instance.end_line,
-                    instance.end_col
+                    "Clone Group #{} ({}, similarity: {:.1}%)",
+                    i + 1,
+                    group.clone_type.as_str(),
+                    group.similarity * 100.0
+                );
+                println!(
+                    "  {} instances, avg {} lines",
+                    group.size(),
+                    group.avg_lines() as usize
                 );
 
-                if verbose {
-                    // Show complete code content
-                    for line in instance.content.lines() {
-                        println!("      {}", line.dimmed());
+                for instance in &group.instances {
+                    println!(
+                        "    {}:{}:{}-{}:{}",
+                        instance.file.display().to_string().cyan(),
+                        instance.start_line,
+                        instance.start_col,
+                        instance.end_line,
+                        instance.end_col
+                    );
+
+                    if verbose {
+                        // Show complete code content
+                        for line in instance.content.lines() {
+                            println!("      {}", line.dimmed());
+                        }
                     }
                 }
+                println!();
             }
-            println!();
+
+            if max_groups > 0 && clone_groups.len() > max_groups {
+                println!(
+                    "{}",
+                    format!(
+                        "... and {} more clone group(s) (use --max-groups 0 to show all)",
+                        clone_groups.len() - max_groups
+                    )
+                    .yellow()
+                );
+                println!();
+            }
         }
 
         let total_instances: usize = clone_groups.iter().map(|g| g.size()).sum();
+        let total_duplicated_lines: usize = clone_groups
+            .iter()
+            .flat_map(|g| &g.instances)
+            .map(|c| c.end_line - c.start_line + 1)
+            .sum();
+
         println!(
-            "Total: {} clone instances in {} groups",
-            total_instances.to_string().red().bold(),
+            "{}",
+            "Summary Statistics:".bright_white().bold()
+        );
+        println!(
+            "  Total clone instances: {}",
+            total_instances.to_string().red().bold()
+        );
+        println!(
+            "  Total clone groups: {}",
             clone_groups.len().to_string().red().bold()
+        );
+        println!(
+            "  Duplicated lines: {}",
+            total_duplicated_lines.to_string().red().bold()
         );
     }
 
     println!();
-    println!(
-        "Analyzed in {:.2}s ({} files/sec)",
-        duration.as_secs_f64(),
-        (files.len() as f64 / duration.as_secs_f64()) as usize
-    );
 
     // Export to other formats
     match format {
         "json" => {
-            let json_output = serde_json::to_string_pretty(&clone_groups)?;
-            println!("{}", json_output);
+            let total_lines: usize = files.iter().map(|f| f.content.lines().count()).sum();
+            let output = JsonOutput::new(
+                clone_groups,
+                &config,
+                files.len(),
+                total_lines,
+                duration.as_secs_f64(),
+            );
+            let json_str = output.to_json()?;
+            println!("{}", json_str);
         }
         "sarif" => {
-            println!(
-                "{}",
-                "⚠ Export format 'sarif' not yet implemented".yellow()
-            );
+            let report = SarifReport::from_clone_groups(clone_groups, &config);
+            let sarif_str = report.to_json()?;
+            println!("{}", sarif_str);
         }
         "text" => {
             // Already displayed above
@@ -162,6 +218,15 @@ pub fn run(
                 format!("⚠ Unknown export format '{}'", format).yellow()
             );
         }
+    }
+
+    // Set exit code based on results
+    // Exit codes:
+    // 0 = No duplicates found (success)
+    // 1 = Duplicates found
+    // 2 = Error (handled by anyhow's ? operator in main)
+    if has_clones {
+        process::exit(1);
     }
 
     Ok(())

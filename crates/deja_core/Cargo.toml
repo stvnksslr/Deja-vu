@@ -19,6 +19,7 @@ dashmap.workspace = true
 
 [dev-dependencies]
 criterion = "0.5"
+deja_python = { path = "../deja_python" }
 
 # Benchmarks disabled until implemented
 # [[bench]]

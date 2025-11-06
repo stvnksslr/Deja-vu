@@ -3,7 +3,8 @@
 use colored::*;
 
 pub fn run() {
-    println!("{} v{}",
+    println!(
+        "{} v{}",
         "Deja-vu".bright_blue().bold(),
         env!("CARGO_PKG_VERSION")
     );

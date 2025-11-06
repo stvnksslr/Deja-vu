@@ -27,11 +27,7 @@ impl TokenBasedDetector {
     }
 
     /// Register a tokenizer for a language
-    pub fn register_tokenizer(
-        &mut self,
-        language: String,
-        tokenizer: Box<dyn LanguageTokenizer>,
-    ) {
+    pub fn register_tokenizer(&mut self, language: String, tokenizer: Box<dyn LanguageTokenizer>) {
         self.tokenizers.insert(language, tokenizer);
     }
 
@@ -64,7 +60,7 @@ impl TokenBasedDetector {
                 let normalized = match token.token_type {
                     TokenType::Identifier => "$ID".to_string(),
                     TokenType::Literal => "$LIT".to_string(),
-                    TokenType::Comment | TokenType::Whitespace => return None,
+                    TokenType::Whitespace => return None,
                     _ => token.value.clone(),
                 };
 
@@ -118,6 +114,12 @@ impl TokenBasedDetector {
                     let start_token = &tokens[start_orig_idx];
                     let end_token = &tokens[end_orig_idx];
 
+                    // Collect all token indices in this window for filtered display
+                    let token_indices: Vec<usize> = normalized[norm_window_start..norm_window_end]
+                        .iter()
+                        .map(|nt| nt.original_index)
+                        .collect();
+
                     let candidate = CloneCandidate {
                         file_path: file.path.clone(),
                         start_line: start_token.line,
@@ -126,10 +128,10 @@ impl TokenBasedDetector {
                         end_col: end_token.column,
                         start_offset: start_token.start,
                         end_offset: end_token.end,
-                        token_count: config.min_tokens,
+                        token_indices,
                     };
 
-                    hash_map.entry(hash).or_insert_with(Vec::new).push(candidate);
+                    hash_map.entry(hash).or_default().push(candidate);
                 }
             }
 
@@ -180,31 +182,38 @@ impl TokenBasedDetector {
             for candidate in candidates {
                 // Find the source file to extract content
                 if let Some(source_file) = files.iter().find(|f| f.path == candidate.file_path) {
-                    let content = self.extract_content(
-                        &source_file.content,
-                        candidate.start_offset,
-                        candidate.end_offset,
-                    );
+                    // Tokenize the file to get tokens for content extraction
+                    if let Ok(tokens) = self.tokenize_file(source_file) {
+                        // Use filtered content extraction to exclude comments/docstrings
+                        let content = self.extract_content_filtered(
+                            &source_file.content,
+                            &tokens,
+                            &candidate.token_indices,
+                        );
 
-                    let clone = Clone::new(
-                        candidate.file_path.clone(),
-                        candidate.start_line,
-                        candidate.end_line,
-                        candidate.start_col,
-                        candidate.end_col,
-                        content,
-                    );
+                        let clone = Clone::new(
+                            candidate.file_path.clone(),
+                            candidate.start_line,
+                            candidate.end_line,
+                            candidate.start_col,
+                            candidate.end_col,
+                            content,
+                        );
 
-                    group.add_instance(clone);
+                        group.add_instance(clone);
+                    }
                 }
             }
 
-            // Only keep groups with multiple instances from different files
-            // (clones within the same file are artifacts of the sliding window)
-            if group.size() >= 2 && self.has_multiple_files(&group) {
-                // Filter out common boilerplate patterns
-                if !self.is_boilerplate_pattern(&group) {
-                    groups.push(group);
+            // Keep groups with multiple instances
+            // For same-file clones, ensure they're not overlapping (artifacts of sliding window)
+            if group.size() >= 2 {
+                // If all clones are in the same file, check they don't overlap
+                if self.has_multiple_files(&group) || !self.has_overlapping_instances(&group) {
+                    // Filter out common boilerplate patterns
+                    if !self.is_boilerplate_pattern(&group) {
+                        groups.push(group);
+                    }
                 }
             }
         }
@@ -219,15 +228,84 @@ impl TokenBasedDetector {
         }
 
         let first_file = &group.instances[0].file;
-        group.instances.iter().any(|clone| &clone.file != first_file)
+        group
+            .instances
+            .iter()
+            .any(|clone| &clone.file != first_file)
     }
 
-    /// Extract content from source between offsets
+    /// Check if clone instances overlap (for same-file clones)
+    /// Overlapping clones are likely sliding window artifacts
+    fn has_overlapping_instances(&self, group: &CloneGroup) -> bool {
+        let instances = &group.instances;
+
+        // Sort instances by file and line for comparison
+        let mut sorted_instances = instances.clone();
+        sorted_instances.sort_by(|a, b| a.file.cmp(&b.file).then(a.start_line.cmp(&b.start_line)));
+
+        // Check each pair of consecutive instances for overlap
+        for i in 0..sorted_instances.len().saturating_sub(1) {
+            let current = &sorted_instances[i];
+            let next = &sorted_instances[i + 1];
+
+            // Only check overlap if same file
+            if current.file == next.file {
+                // Check if ranges overlap
+                if current.end_line >= next.start_line {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Extract content from source between offsets (legacy method)
     fn extract_content(&self, source: &str, start: usize, end: usize) -> String {
-        source
-            .get(start..end)
-            .unwrap_or("")
-            .to_string()
+        source.get(start..end).unwrap_or("").to_string()
+    }
+
+    /// Extract content using filtered token indices (excludes comments/docstrings)
+    fn extract_content_filtered(
+        &self,
+        source: &str,
+        tokens: &[Token],
+        token_indices: &[usize],
+    ) -> String {
+        if token_indices.is_empty() {
+            return String::new();
+        }
+
+        // Reconstruct content from the specified tokens only
+        let mut content = String::new();
+        let mut last_line = 0;
+        let mut last_end = 0;
+
+        for &idx in token_indices {
+            if idx >= tokens.len() {
+                continue;
+            }
+
+            let token = &tokens[idx];
+
+            // Add newline if this token is on a different line
+            if token.line > last_line && last_line > 0 {
+                content.push('\n');
+                // Add proper indentation based on column
+                content.push_str(&" ".repeat(token.column));
+            } else if token.start > last_end && last_end > 0 && token.line == last_line {
+                // Add space between tokens on the same line
+                content.push(' ');
+            }
+
+            // Add the token content
+            content.push_str(&source[token.start..token.end]);
+
+            last_line = token.line;
+            last_end = token.end;
+        }
+
+        content
     }
 
     /// Check if a clone group represents common boilerplate code
@@ -260,21 +338,28 @@ impl TokenBasedDetector {
 
     /// Check if content is primarily imports
     fn is_import_block(&self, content: &str) -> bool {
-        let lines: Vec<&str> = content.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+        let lines: Vec<&str> = content
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .collect();
 
         if lines.is_empty() {
             return false;
         }
 
         // Count import-related lines
-        let import_lines = lines.iter().filter(|line| {
-            line.starts_with("import ") ||
-            line.starts_with("from ") ||
-            line.starts_with("using ") ||
-            line.starts_with("#include") ||
-            line.starts_with("require(") ||
-            line.starts_with("use ")
-        }).count();
+        let import_lines = lines
+            .iter()
+            .filter(|line| {
+                line.starts_with("import ")
+                    || line.starts_with("from ")
+                    || line.starts_with("using ")
+                    || line.starts_with("#include")
+                    || line.starts_with("require(")
+                    || line.starts_with("use ")
+            })
+            .count();
 
         // If 80%+ of non-empty lines are imports, it's boilerplate
         import_lines as f64 / lines.len() as f64 > 0.8
@@ -282,7 +367,11 @@ impl TokenBasedDetector {
 
     /// Check if content is test boilerplate (simple class/function setup)
     fn is_test_boilerplate(&self, content: &str) -> bool {
-        let lines: Vec<&str> = content.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+        let lines: Vec<&str> = content
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .collect();
 
         if lines.len() > 10 {
             return false; // Too long to be simple boilerplate
@@ -300,7 +389,9 @@ impl TokenBasedDetector {
             "@unittest",
         ];
 
-        let has_test_pattern = test_patterns.iter().any(|pattern| content.contains(pattern));
+        let has_test_pattern = test_patterns
+            .iter()
+            .any(|pattern| content.contains(pattern));
 
         // If it has test patterns and is short, likely boilerplate
         has_test_pattern && lines.len() <= 8
@@ -308,26 +399,33 @@ impl TokenBasedDetector {
 
     /// Check if content is a simple declaration (class/function header with minimal logic)
     fn is_simple_declaration(&self, content: &str) -> bool {
-        let lines: Vec<&str> = content.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+        let lines: Vec<&str> = content
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .collect();
 
         if lines.is_empty() || lines.len() > 12 {
             return false;
         }
 
         // Count lines that are just structural (declarations, pass, comments, braces)
-        let structural_lines = lines.iter().filter(|line| {
-            line.starts_with("class ") ||
-            line.starts_with("def ") ||
-            line.starts_with("function ") ||
-            line.starts_with("public ") ||
-            line.starts_with("private ") ||
-            line.starts_with("protected ") ||
-            **line == "pass" ||
-            **line == "{" ||
-            **line == "}" ||
-            line.starts_with("//") ||
-            line.starts_with("#")
-        }).count();
+        let structural_lines = lines
+            .iter()
+            .filter(|line| {
+                line.starts_with("class ")
+                    || line.starts_with("def ")
+                    || line.starts_with("function ")
+                    || line.starts_with("public ")
+                    || line.starts_with("private ")
+                    || line.starts_with("protected ")
+                    || **line == "pass"
+                    || **line == "{"
+                    || **line == "}"
+                    || line.starts_with("//")
+                    || line.starts_with("#")
+            })
+            .count();
 
         // If 70%+ of lines are structural, it's likely simple boilerplate
         structural_lines as f64 / lines.len() as f64 > 0.7
@@ -481,7 +579,8 @@ struct CloneCandidate {
     end_col: usize,
     start_offset: usize,
     end_offset: usize,
-    token_count: usize,
+    /// Original token indices that make up this clone (for filtered display)
+    token_indices: Vec<usize>,
 }
 
 /// Normalized token with original index tracking
@@ -707,8 +806,16 @@ mod tests {
 
         let code = "def foo bar baz qux".to_string();
         let files = vec![
-            SourceFile::new(PathBuf::from("test1.mock"), code.clone(), "mock".to_string()),
-            SourceFile::new(PathBuf::from("test2.mock"), code.clone(), "mock".to_string()),
+            SourceFile::new(
+                PathBuf::from("test1.mock"),
+                code.clone(),
+                "mock".to_string(),
+            ),
+            SourceFile::new(
+                PathBuf::from("test2.mock"),
+                code.clone(),
+                "mock".to_string(),
+            ),
         ];
 
         let result = detector.detect(&files, &config);
@@ -735,8 +842,16 @@ mod tests {
 
         let code = "def foo bar".to_string();
         let files = vec![
-            SourceFile::new(PathBuf::from("test1.mock"), code.clone(), "mock".to_string()),
-            SourceFile::new(PathBuf::from("test2.mock"), code.clone(), "mock".to_string()),
+            SourceFile::new(
+                PathBuf::from("test1.mock"),
+                code.clone(),
+                "mock".to_string(),
+            ),
+            SourceFile::new(
+                PathBuf::from("test2.mock"),
+                code.clone(),
+                "mock".to_string(),
+            ),
         ];
 
         let result = detector.detect(&files, &config);
@@ -752,25 +867,17 @@ mod tests {
         let detector = TokenBasedDetector::new();
 
         // Test overlapping clones
-        let clone1 = Clone::new(
-            PathBuf::from("test.rs"),
-            1, 10,
-            0, 0,
-            "content".to_string(),
-        );
-        let clone2 = Clone::new(
-            PathBuf::from("test.rs"),
-            5, 15,
-            0, 0,
-            "content".to_string(),
-        );
+        let clone1 = Clone::new(PathBuf::from("test.rs"), 1, 10, 0, 0, "content".to_string());
+        let clone2 = Clone::new(PathBuf::from("test.rs"), 5, 15, 0, 0, "content".to_string());
         assert!(detector.clones_overlap(&clone1, &clone2));
 
         // Test non-overlapping clones
         let clone3 = Clone::new(
             PathBuf::from("test.rs"),
-            20, 30,
-            0, 0,
+            20,
+            30,
+            0,
+            0,
             "content".to_string(),
         );
         assert!(!detector.clones_overlap(&clone1, &clone3));
@@ -778,8 +885,10 @@ mod tests {
         // Test adjacent clones (should overlap at boundary)
         let clone4 = Clone::new(
             PathBuf::from("test.rs"),
-            10, 20,
-            0, 0,
+            10,
+            20,
+            0,
+            0,
             "content".to_string(),
         );
         assert!(detector.clones_overlap(&clone1, &clone4));
@@ -793,28 +902,36 @@ mod tests {
         let mut group1 = CloneGroup::new(CloneType::Type1, 1.0, "hash1".to_string());
         group1.add_instance(Clone::new(
             PathBuf::from("file1.rs"),
-            1, 10,
-            0, 0,
+            1,
+            10,
+            0,
+            0,
             "content".to_string(),
         ));
         group1.add_instance(Clone::new(
             PathBuf::from("file2.rs"),
-            1, 10,
-            0, 0,
+            1,
+            10,
+            0,
+            0,
             "content".to_string(),
         ));
 
         let mut group2 = CloneGroup::new(CloneType::Type1, 1.0, "hash2".to_string());
         group2.add_instance(Clone::new(
             PathBuf::from("file1.rs"),
-            5, 15,
-            0, 0,
+            5,
+            15,
+            0,
+            0,
             "content".to_string(),
         ));
         group2.add_instance(Clone::new(
             PathBuf::from("file2.rs"),
-            5, 15,
-            0, 0,
+            5,
+            15,
+            0,
+            0,
             "content".to_string(),
         ));
 
@@ -825,8 +942,10 @@ mod tests {
         let mut group3 = CloneGroup::new(CloneType::Type1, 1.0, "hash3".to_string());
         group3.add_instance(Clone::new(
             PathBuf::from("file3.rs"),
-            1, 10,
-            0, 0,
+            1,
+            10,
+            0,
+            0,
             "content".to_string(),
         ));
 
@@ -841,28 +960,36 @@ mod tests {
         let mut group1 = CloneGroup::new(CloneType::Type1, 1.0, "hash1".to_string());
         group1.add_instance(Clone::new(
             PathBuf::from("file1.rs"),
-            1, 10,
-            0, 50,
+            1,
+            10,
+            0,
+            50,
             "content1".to_string(),
         ));
         group1.add_instance(Clone::new(
             PathBuf::from("file2.rs"),
-            1, 10,
-            0, 50,
+            1,
+            10,
+            0,
+            50,
             "content1".to_string(),
         ));
 
         let mut group2 = CloneGroup::new(CloneType::Type1, 1.0, "hash2".to_string());
         group2.add_instance(Clone::new(
             PathBuf::from("file1.rs"),
-            5, 15,
-            0, 50,
+            5,
+            15,
+            0,
+            50,
             "longer content2".to_string(),
         ));
         group2.add_instance(Clone::new(
             PathBuf::from("file2.rs"),
-            5, 15,
-            0, 50,
+            5,
+            15,
+            0,
+            50,
             "longer content2".to_string(),
         ));
 
@@ -873,12 +1000,20 @@ mod tests {
         assert_eq!(merged.len(), 1);
 
         // The merged group should have extended boundaries in both files
-        let file1_clone = merged[0].instances.iter().find(|c| c.file == PathBuf::from("file1.rs")).unwrap();
-        assert_eq!(file1_clone.start_line, 1);  // min of 1 and 5
-        assert_eq!(file1_clone.end_line, 15);   // max of 10 and 15
+        let file1_clone = merged[0]
+            .instances
+            .iter()
+            .find(|c| c.file == PathBuf::from("file1.rs"))
+            .unwrap();
+        assert_eq!(file1_clone.start_line, 1); // min of 1 and 5
+        assert_eq!(file1_clone.end_line, 15); // max of 10 and 15
         assert_eq!(file1_clone.content, "longer content2");
 
-        let file2_clone = merged[0].instances.iter().find(|c| c.file == PathBuf::from("file2.rs")).unwrap();
+        let file2_clone = merged[0]
+            .instances
+            .iter()
+            .find(|c| c.file == PathBuf::from("file2.rs"))
+            .unwrap();
         assert_eq!(file2_clone.start_line, 1);
         assert_eq!(file2_clone.end_line, 15);
     }
@@ -891,28 +1026,36 @@ mod tests {
         let mut group1 = CloneGroup::new(CloneType::Type1, 1.0, "hash1".to_string());
         group1.add_instance(Clone::new(
             PathBuf::from("file1.rs"),
-            1, 10,
-            0, 0,
+            1,
+            10,
+            0,
+            0,
             "content1".to_string(),
         ));
         group1.add_instance(Clone::new(
             PathBuf::from("file2.rs"),
-            1, 10,
-            0, 0,
+            1,
+            10,
+            0,
+            0,
             "content1".to_string(),
         ));
 
         let mut group2 = CloneGroup::new(CloneType::Type1, 1.0, "hash2".to_string());
         group2.add_instance(Clone::new(
             PathBuf::from("file1.rs"),
-            20, 30,
-            0, 0,
+            20,
+            30,
+            0,
+            0,
             "content2".to_string(),
         ));
         group2.add_instance(Clone::new(
             PathBuf::from("file2.rs"),
-            20, 30,
-            0, 0,
+            20,
+            30,
+            0,
+            0,
             "content2".to_string(),
         ));
 
@@ -931,42 +1074,54 @@ mod tests {
         let mut group1 = CloneGroup::new(CloneType::Type1, 1.0, "hash1".to_string());
         group1.add_instance(Clone::new(
             PathBuf::from("file1.rs"),
-            1, 10,
-            0, 0,
+            1,
+            10,
+            0,
+            0,
             "content1".to_string(),
         ));
         group1.add_instance(Clone::new(
             PathBuf::from("file2.rs"),
-            1, 10,
-            0, 0,
+            1,
+            10,
+            0,
+            0,
             "content1".to_string(),
         ));
 
         let mut group2 = CloneGroup::new(CloneType::Type1, 1.0, "hash2".to_string());
         group2.add_instance(Clone::new(
             PathBuf::from("file1.rs"),
-            5, 15,
-            0, 0,
+            5,
+            15,
+            0,
+            0,
             "content2".to_string(),
         ));
         group2.add_instance(Clone::new(
             PathBuf::from("file2.rs"),
-            5, 15,
-            0, 0,
+            5,
+            15,
+            0,
+            0,
             "content2".to_string(),
         ));
 
         let mut group3 = CloneGroup::new(CloneType::Type1, 1.0, "hash3".to_string());
         group3.add_instance(Clone::new(
             PathBuf::from("file1.rs"),
-            10, 20,
-            0, 0,
+            10,
+            20,
+            0,
+            0,
             "content3".to_string(),
         ));
         group3.add_instance(Clone::new(
             PathBuf::from("file2.rs"),
-            10, 20,
-            0, 0,
+            10,
+            20,
+            0,
+            0,
             "content3".to_string(),
         ));
 
@@ -977,11 +1132,19 @@ mod tests {
         assert_eq!(merged.len(), 1);
 
         // The merged group should span from 1 to 20 in both files
-        let file1_clone = merged[0].instances.iter().find(|c| c.file == PathBuf::from("file1.rs")).unwrap();
+        let file1_clone = merged[0]
+            .instances
+            .iter()
+            .find(|c| c.file == PathBuf::from("file1.rs"))
+            .unwrap();
         assert_eq!(file1_clone.start_line, 1);
         assert_eq!(file1_clone.end_line, 20);
 
-        let file2_clone = merged[0].instances.iter().find(|c| c.file == PathBuf::from("file2.rs")).unwrap();
+        let file2_clone = merged[0]
+            .instances
+            .iter()
+            .find(|c| c.file == PathBuf::from("file2.rs"))
+            .unwrap();
         assert_eq!(file2_clone.start_line, 1);
         assert_eq!(file2_clone.end_line, 20);
     }

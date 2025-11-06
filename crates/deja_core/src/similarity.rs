@@ -13,17 +13,11 @@ pub struct JaccardSimilarity;
 
 impl SimilarityMetric for JaccardSimilarity {
     fn calculate(&self, a: &TokenSequence, b: &TokenSequence) -> f64 {
-        let set_a: std::collections::HashSet<_> = a
-            .tokens
-            .iter()
-            .map(|t| t.normalize(true))
-            .collect();
+        let set_a: std::collections::HashSet<_> =
+            a.tokens.iter().map(|t| t.normalize(true)).collect();
 
-        let set_b: std::collections::HashSet<_> = b
-            .tokens
-            .iter()
-            .map(|t| t.normalize(true))
-            .collect();
+        let set_b: std::collections::HashSet<_> =
+            b.tokens.iter().map(|t| t.normalize(true)).collect();
 
         let intersection = set_a.intersection(&set_b).count();
         let union = set_a.union(&set_b).count();
@@ -82,7 +76,11 @@ fn levenshtein_distance(s1: &str, s2: &str) -> usize {
 
     for i in 1..=len1 {
         for j in 1..=len2 {
-            let cost = if s1_chars[i - 1] == s2_chars[j - 1] { 0 } else { 1 };
+            let cost = if s1_chars[i - 1] == s2_chars[j - 1] {
+                0
+            } else {
+                1
+            };
             matrix[i][j] = (matrix[i - 1][j] + 1)
                 .min(matrix[i][j - 1] + 1)
                 .min(matrix[i - 1][j - 1] + cost);
@@ -101,14 +99,16 @@ mod tests {
         let tokens = tokens
             .into_iter()
             .enumerate()
-            .map(|(i, t)| Token::new(
-                TokenType::Keyword,
-                t.to_string(),
-                i * 4,
-                i * 4 + 3,
-                1,
-                i * 4,
-            ))
+            .map(|(i, t)| {
+                Token::new(
+                    TokenType::Keyword,
+                    t.to_string(),
+                    i * 4,
+                    i * 4 + 3,
+                    1,
+                    i * 4,
+                )
+            })
             .collect();
         TokenSequence::new(tokens)
     }

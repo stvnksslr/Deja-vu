@@ -137,14 +137,7 @@ mod tests {
 
     #[test]
     fn test_clone_line_count() {
-        let clone = Clone::new(
-            PathBuf::from("test.py"),
-            10,
-            15,
-            0,
-            10,
-            "code".to_string(),
-        );
+        let clone = Clone::new(PathBuf::from("test.py"), 10, 15, 0, 10, "code".to_string());
         assert_eq!(clone.line_count(), 6);
     }
 

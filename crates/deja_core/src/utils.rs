@@ -6,7 +6,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Collect source files from given paths
-pub fn collect_files(paths: &[PathBuf], extensions: &[&str], exclude_tests: bool) -> Result<Vec<SourceFile>> {
+pub fn collect_files(
+    paths: &[PathBuf],
+    extensions: &[&str],
+    exclude_tests: bool,
+) -> Result<Vec<SourceFile>> {
     let mut files = Vec::new();
 
     for path in paths {
@@ -25,7 +29,11 @@ pub fn collect_files(paths: &[PathBuf], extensions: &[&str], exclude_tests: bool
 }
 
 /// Collect a single file if it matches the extensions
-fn collect_single_file(path: &Path, extensions: &[&str], exclude_tests: bool) -> Result<Option<SourceFile>> {
+fn collect_single_file(
+    path: &Path,
+    extensions: &[&str],
+    exclude_tests: bool,
+) -> Result<Option<SourceFile>> {
     if !should_include_file(path, extensions) {
         return Ok(None);
     }
@@ -39,11 +47,7 @@ fn collect_single_file(path: &Path, extensions: &[&str], exclude_tests: bool) ->
 
     let language = detect_language(path);
 
-    Ok(Some(SourceFile::new(
-        path.to_path_buf(),
-        content,
-        language,
-    )))
+    Ok(Some(SourceFile::new(path.to_path_buf(), content, language)))
 }
 
 /// Recursively collect files from a directory
@@ -91,7 +95,7 @@ fn should_include_file(path: &Path, extensions: &[&str]) -> bool {
 
     path.extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| extensions.iter().any(|&allowed| allowed == ext))
+        .map(|ext| extensions.contains(&ext))
         .unwrap_or(false)
 }
 

@@ -4,10 +4,11 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use colored::*;
 use std::path::PathBuf;
 
 mod commands;
+mod output;
+mod sarif;
 use commands::{check, version};
 
 #[derive(Parser)]
@@ -35,11 +36,11 @@ enum Commands {
         paths: Vec<PathBuf>,
 
         /// Minimum number of lines for a clone
-        #[arg(long, default_value = "5")]
+        #[arg(long, default_value = "4")]
         min_lines: usize,
 
         /// Minimum number of tokens for a clone
-        #[arg(long, default_value = "50")]
+        #[arg(long, default_value = "20")]
         min_tokens: usize,
 
         /// Similarity threshold (0.0 to 1.0)
@@ -53,6 +54,18 @@ enum Commands {
         /// Exclude files with "test" in the name
         #[arg(long)]
         exclude_tests: bool,
+
+        /// Maximum number of clone groups to display (0 = unlimited)
+        #[arg(long, default_value = "0")]
+        max_groups: usize,
+
+        /// Display only summary statistics, not individual clones
+        #[arg(long)]
+        summary_only: bool,
+
+        /// Show code snippets in output (same as --verbose)
+        #[arg(long)]
+        show_code: bool,
     },
 
     /// Show version information
@@ -73,9 +86,21 @@ fn main() -> Result<()> {
             threshold,
             mode,
             exclude_tests,
-        } => {
-            check::run(paths, min_lines, min_tokens, threshold, &mode, &cli.format, cli.verbose, exclude_tests)
-        }
+            max_groups,
+            summary_only,
+            show_code,
+        } => check::run(
+            paths,
+            min_lines,
+            min_tokens,
+            threshold,
+            &mode,
+            &cli.format,
+            cli.verbose || show_code,
+            exclude_tests,
+            max_groups,
+            summary_only,
+        ),
         Commands::Version => {
             version::run();
             Ok(())

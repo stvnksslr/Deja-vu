@@ -53,7 +53,9 @@ impl RollingHash {
 
             // Remove old token contribution
             let base_power = self.mod_pow(self.base, self.window_size as u64 - 1);
-            self.current_hash = (self.current_hash + self.modulus - (old_token * base_power) % self.modulus) % self.modulus;
+            self.current_hash = (self.current_hash + self.modulus
+                - (old_token * base_power) % self.modulus)
+                % self.modulus;
 
             // Add new token
             self.current_hash = (self.current_hash * self.base + token_hash) % self.modulus;
@@ -259,7 +261,10 @@ mod tests {
         roller.push("@#$");
         let hash2 = roller.push("!%^");
 
-        assert_eq!(hash1, hash2, "Should handle special characters consistently");
+        assert_eq!(
+            hash1, hash2,
+            "Should handle special characters consistently"
+        );
     }
 
     #[test]

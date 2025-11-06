@@ -36,8 +36,8 @@ impl Default for DetectionConfig {
     fn default() -> Self {
         Self {
             mode: DetectionMode::Balanced,
-            min_tokens: 50,
-            min_lines: 5,
+            min_tokens: 20, // Lowered from 50 to detect small to medium duplicates (10-15 lines)
+            min_lines: 4,   // Lowered from 5 for better sensitivity
             similarity_threshold: 0.85,
             ignore_comments: true,
             ignore_whitespace: true,
@@ -49,6 +49,8 @@ impl DetectionConfig {
     pub fn fast() -> Self {
         Self {
             mode: DetectionMode::Fast,
+            min_tokens: 30, // Higher threshold for faster processing
+            min_lines: 5,
             ..Default::default()
         }
     }
@@ -63,7 +65,8 @@ impl DetectionConfig {
     pub fn precise() -> Self {
         Self {
             mode: DetectionMode::Precise,
-            min_tokens: 30,
+            min_tokens: 15, // Lower threshold for more precise detection
+            min_lines: 3,
             similarity_threshold: 0.80,
             ..Default::default()
         }

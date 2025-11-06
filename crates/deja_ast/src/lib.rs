@@ -22,7 +22,14 @@ pub struct Span {
 }
 
 impl Span {
-    pub fn new(start: usize, end: usize, line_start: usize, line_end: usize, column_start: usize, column_end: usize) -> Self {
+    pub fn new(
+        start: usize,
+        end: usize,
+        line_start: usize,
+        line_end: usize,
+        column_start: usize,
+        column_end: usize,
+    ) -> Self {
         Self {
             start,
             end,
@@ -196,8 +203,7 @@ mod tests {
     #[test]
     fn test_ast_node_creation() {
         let span = Span::new(0, 5, 1, 1, 0, 5);
-        let node = AstNode::new(0, NodeKind::Function, span)
-            .with_text("my_function".to_string());
+        let node = AstNode::new(0, NodeKind::Function, span).with_text("my_function".to_string());
 
         assert_eq!(node.id, 0);
         assert_eq!(node.kind, NodeKind::Function);
