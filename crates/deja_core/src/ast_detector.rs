@@ -6,7 +6,7 @@
 
 use crate::clone::{Clone, CloneGroup, CloneType};
 use crate::detector::{CloneDetector, DetectionConfig};
-use crate::tree_edit_distance::{edit_distance_to_similarity, tree_edit_distance, EditCosts};
+use crate::tree_edit_distance::{edit_distance_to_similarity, tree_edit_distance_bounded, EditCosts};
 use crate::SourceFile;
 use anyhow::Result;
 use deja_ast::Ast;
@@ -241,13 +241,25 @@ impl AstBasedDetector {
                 let ast1 = &parsed_files[candidate.file1_idx].1;
                 let ast2 = &parsed_files[candidate.file2_idx].1;
 
-                let distance = tree_edit_distance(
+                // Calculate maximum distance for early termination based on similarity threshold
+                // similarity = 1 - (distance / max_size)
+                // distance_threshold = (1 - similarity_threshold) * max_size
+                let max_size = candidate.subtree1.size.max(candidate.subtree2.size);
+                let max_distance = ((1.0 - config.similarity_threshold) * max_size as f64).ceil();
+
+                let distance = tree_edit_distance_bounded(
                     ast1,
                     candidate.subtree1.root_id,
                     ast2,
                     candidate.subtree2.root_id,
                     &costs,
+                    max_distance,
                 );
+
+                // Skip if distance exceeded threshold (early terminated)
+                if distance >= max_distance {
+                    return None;
+                }
 
                 let similarity = edit_distance_to_similarity(
                     distance,

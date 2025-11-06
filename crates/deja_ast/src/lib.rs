@@ -216,20 +216,22 @@ impl Ast {
         }
     }
 
-    pub fn add_node(&mut self, node: AstNode) -> NodeId {
-        let id = node.id;
+    pub fn add_node(&mut self, mut node: AstNode) -> NodeId {
+        // Assign ID based on position in vector for O(1) lookup
+        let id = self.nodes.len();
+        node.id = id;
         self.nodes.push(node);
         id
     }
 
     pub fn get_node(&self, id: NodeId) -> Option<&AstNode> {
-        // Search for node by ID, not by index
-        self.nodes.iter().find(|node| node.id == id)
+        // O(1) direct index lookup (ID = index in vector)
+        self.nodes.get(id)
     }
 
     pub fn get_node_mut(&mut self, id: NodeId) -> Option<&mut AstNode> {
-        // Search for node by ID, not by index
-        self.nodes.iter_mut().find(|node| node.id == id)
+        // O(1) direct index lookup (ID = index in vector)
+        self.nodes.get_mut(id)
     }
 }
 

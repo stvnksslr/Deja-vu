@@ -35,6 +35,9 @@ const MAX_RECURSION_DEPTH: usize = 100;
 const MAX_TREE_SIZE: usize = 500;
 
 /// Calculates the tree edit distance between two AST subtrees
+///
+/// Optionally takes a max_distance parameter for early termination.
+/// If the distance exceeds max_distance, computation stops early.
 pub fn tree_edit_distance(
     ast1: &Ast,
     node1_id: usize,
@@ -42,7 +45,19 @@ pub fn tree_edit_distance(
     node2_id: usize,
     costs: &EditCosts,
 ) -> f64 {
-    tree_edit_distance_with_depth(ast1, node1_id, ast2, node2_id, costs, 0)
+    tree_edit_distance_with_depth(ast1, node1_id, ast2, node2_id, costs, 0, f64::INFINITY)
+}
+
+/// Calculates tree edit distance with early termination if distance exceeds max_distance
+pub fn tree_edit_distance_bounded(
+    ast1: &Ast,
+    node1_id: usize,
+    ast2: &Ast,
+    node2_id: usize,
+    costs: &EditCosts,
+    max_distance: f64,
+) -> f64 {
+    tree_edit_distance_with_depth(ast1, node1_id, ast2, node2_id, costs, 0, max_distance)
 }
 
 /// Internal function with depth tracking to prevent stack overflow
@@ -53,11 +68,12 @@ fn tree_edit_distance_with_depth(
     node2_id: usize,
     costs: &EditCosts,
     depth: usize,
+    max_distance: f64,
 ) -> f64 {
     // Prevent stack overflow by limiting recursion depth
     if depth > MAX_RECURSION_DEPTH {
         // Return a large distance to indicate these trees are too different to compare safely
-        return 1000.0;
+        return max_distance;
     }
 
     let node1 = ast1.get_node(node1_id);
@@ -89,7 +105,7 @@ fn tree_edit_distance_with_depth(
     let node2 = node2.unwrap();
 
     // Use dynamic programming to compute edit distance
-    compute_edit_distance_dp(ast1, node1, ast2, node2, costs, depth)
+    compute_edit_distance_dp(ast1, node1, ast2, node2, costs, depth, max_distance)
 }
 
 /// Compute edit distance using dynamic programming
@@ -100,6 +116,7 @@ fn compute_edit_distance_dp(
     node2: &AstNode,
     costs: &EditCosts,
     depth: usize,
+    max_distance: f64,
 ) -> f64 {
     let children1 = &node1.children;
     let children2 = &node2.children;
@@ -152,17 +169,25 @@ fn compute_edit_distance_dp(
 
     // Fill DP table
     for i in 1..=m {
+        let mut row_min = f64::INFINITY;
         for j in 1..=n {
             let child1_id = children1[i - 1];
             let child2_id = children2[j - 1];
 
             // Cost of updating child i to child j (recursive call with incremented depth)
-            let match_cost = tree_edit_distance_with_depth(ast1, child1_id, ast2, child2_id, costs, depth + 1);
+            let match_cost = tree_edit_distance_with_depth(ast1, child1_id, ast2, child2_id, costs, depth + 1, max_distance);
 
             // Minimum of: match/update, delete child1[i], insert child2[j]
             dp[i][j] = (dp[i - 1][j - 1] + match_cost)
                 .min(dp[i - 1][j] + costs.delete)
                 .min(dp[i][j - 1] + costs.insert);
+
+            row_min = row_min.min(dp[i][j]);
+        }
+
+        // Early termination: if the best score in this row exceeds max_distance, stop
+        if update_cost + row_min > max_distance {
+            return max_distance;
         }
     }
 
