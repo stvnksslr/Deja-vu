@@ -6,16 +6,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Collect source files from given paths
-pub fn collect_files(paths: &[PathBuf], extensions: &[&str]) -> Result<Vec<SourceFile>> {
+pub fn collect_files(paths: &[PathBuf], extensions: &[&str], exclude_tests: bool) -> Result<Vec<SourceFile>> {
     let mut files = Vec::new();
 
     for path in paths {
         if path.is_file() {
-            if let Some(file) = collect_single_file(path, extensions)? {
+            if let Some(file) = collect_single_file(path, extensions, exclude_tests)? {
                 files.push(file);
             }
         } else if path.is_dir() {
-            collect_directory(path, extensions, &mut files)?;
+            collect_directory(path, extensions, exclude_tests, &mut files)?;
         } else {
             anyhow::bail!("Path does not exist: {}", path.display());
         }
@@ -25,8 +25,12 @@ pub fn collect_files(paths: &[PathBuf], extensions: &[&str]) -> Result<Vec<Sourc
 }
 
 /// Collect a single file if it matches the extensions
-fn collect_single_file(path: &Path, extensions: &[&str]) -> Result<Option<SourceFile>> {
+fn collect_single_file(path: &Path, extensions: &[&str], exclude_tests: bool) -> Result<Option<SourceFile>> {
     if !should_include_file(path, extensions) {
+        return Ok(None);
+    }
+
+    if exclude_tests && is_test_file(path) {
         return Ok(None);
     }
 
@@ -46,6 +50,7 @@ fn collect_single_file(path: &Path, extensions: &[&str]) -> Result<Option<Source
 fn collect_directory(
     dir: &Path,
     extensions: &[&str],
+    exclude_tests: bool,
     files: &mut Vec<SourceFile>,
 ) -> Result<()> {
     let entries = fs::read_dir(dir)
@@ -66,9 +71,9 @@ fn collect_directory(
         }
 
         if path.is_dir() {
-            collect_directory(&path, extensions, files)?;
+            collect_directory(&path, extensions, exclude_tests, files)?;
         } else if path.is_file() {
-            if let Some(file) = collect_single_file(&path, extensions)? {
+            if let Some(file) = collect_single_file(&path, extensions, exclude_tests)? {
                 files.push(file);
             }
         }
@@ -115,6 +120,14 @@ fn is_hidden(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .map(|name| name.starts_with('.'))
+        .unwrap_or(false)
+}
+
+/// Check if a file is a test file (contains "test" in the name)
+fn is_test_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.to_lowercase().contains("test"))
         .unwrap_or(false)
 }
 
@@ -233,6 +246,16 @@ mod tests {
         assert!(should_include_file(Path::new("test.py"), &["py"]));
         assert!(!should_include_file(Path::new("test.js"), &["py"]));
         assert!(should_include_file(Path::new("test.py"), &[])); // Empty = include all
+    }
+
+    #[test]
+    fn test_is_test_file() {
+        assert!(is_test_file(Path::new("test_example.py")));
+        assert!(is_test_file(Path::new("example_test.py")));
+        assert!(is_test_file(Path::new("TEST_CAPS.py")));
+        assert!(is_test_file(Path::new("MyTestFile.py")));
+        assert!(!is_test_file(Path::new("example.py")));
+        assert!(!is_test_file(Path::new("main.py")));
     }
 
     #[test]

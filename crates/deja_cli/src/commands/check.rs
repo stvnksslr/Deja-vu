@@ -9,6 +9,7 @@ use deja_core::{
 use deja_python::PythonTokenizer;
 use std::path::PathBuf;
 use std::time::Instant;
+use serde_json;
 
 pub fn run(
     paths: Vec<PathBuf>,
@@ -18,6 +19,7 @@ pub fn run(
     mode: &str,
     format: &str,
     verbose: bool,
+    exclude_tests: bool,
 ) -> Result<()> {
     println!("{}", "Deja-vu: Code Duplication Detector".bright_blue().bold());
     println!();
@@ -58,7 +60,7 @@ pub fn run(
     let start = Instant::now();
 
     // For now, only support Python files
-    let files = collect_files(&paths, &["py"])?;
+    let files = collect_files(&paths, &["py"], exclude_tests)?;
 
     if files.is_empty() {
         println!("{}", "No Python files found!".yellow());
@@ -115,13 +117,9 @@ pub fn run(
                 );
 
                 if verbose {
-                    // Show first few lines of code
-                    let preview: Vec<&str> = instance.content.lines().take(3).collect();
-                    for line in preview {
+                    // Show complete code content
+                    for line in instance.content.lines() {
                         println!("      {}", line.dimmed());
-                    }
-                    if instance.content.lines().count() > 3 {
-                        println!("      {}", "...".dimmed());
                     }
                 }
             }
@@ -143,12 +141,27 @@ pub fn run(
         (files.len() as f64 / duration.as_secs_f64()) as usize
     );
 
-    // TODO: Export to other formats (JSON, SARIF)
-    if format != "text" {
-        println!(
-            "{}",
-            format!("⚠ Export format '{}' not yet implemented", format).yellow()
-        );
+    // Export to other formats
+    match format {
+        "json" => {
+            let json_output = serde_json::to_string_pretty(&clone_groups)?;
+            println!("{}", json_output);
+        }
+        "sarif" => {
+            println!(
+                "{}",
+                "⚠ Export format 'sarif' not yet implemented".yellow()
+            );
+        }
+        "text" => {
+            // Already displayed above
+        }
+        _ => {
+            println!(
+                "{}",
+                format!("⚠ Unknown export format '{}'", format).yellow()
+            );
+        }
     }
 
     Ok(())

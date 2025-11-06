@@ -29,7 +29,7 @@ fn test_integration_simple_duplicate() {
     let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../tests/fixtures/simple_duplicate.py");
 
-    let files = collect_files(&[fixture_path], &["py"]).expect("Failed to collect files");
+    let files = collect_files(&[fixture_path], &["py"], false).expect("Failed to collect files");
     assert_eq!(files.len(), 1, "Should find one Python file");
 
     let result = detector.detect(&files, &config);
@@ -59,7 +59,7 @@ fn test_integration_no_duplicates() {
     let fixture_path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/no_duplicates.py");
 
-    let files = collect_files(&[fixture_path], &["py"]).expect("Failed to collect files");
+    let files = collect_files(&[fixture_path], &["py"], false).expect("Failed to collect files");
     assert_eq!(files.len(), 1);
 
     let result = detector.detect(&files, &config);
@@ -88,7 +88,7 @@ fn test_integration_multiple_clones() {
     let fixture_path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/multiple_clones.py");
 
-    let files = collect_files(&[fixture_path], &["py"]).expect("Failed to collect files");
+    let files = collect_files(&[fixture_path], &["py"], false).expect("Failed to collect files");
     let result = detector.detect(&files, &config);
     assert!(result.is_ok());
 
@@ -126,7 +126,7 @@ fn test_integration_respects_min_tokens() {
 
     let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/");
 
-    let files = collect_files(&[fixture_path], &["py"]).expect("Failed to collect files");
+    let files = collect_files(&[fixture_path], &["py"], false).expect("Failed to collect files");
     let result = detector.detect(&files, &config);
     assert!(result.is_ok());
 
@@ -154,7 +154,7 @@ fn test_integration_too_short_file() {
     let fixture_path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/too_short.py");
 
-    let files = collect_files(&[fixture_path], &["py"]).expect("Failed to collect files");
+    let files = collect_files(&[fixture_path], &["py"], false).expect("Failed to collect files");
     let result = detector.detect(&files, &config);
     assert!(result.is_ok());
 
@@ -178,7 +178,7 @@ fn test_integration_examples_directory() {
     let examples_path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/python_duplicates/");
 
-    let files = collect_files(&[examples_path], &["py"]).expect("Failed to collect files");
+    let files = collect_files(&[examples_path], &["py"], false).expect("Failed to collect files");
     assert!(files.len() >= 2, "Should find multiple Python example files");
 
     let result = detector.detect(&files, &config);
@@ -211,7 +211,7 @@ fn test_integration_multiple_files() {
 
     let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/");
 
-    let files = collect_files(&[fixture_path], &["py"]).expect("Failed to collect files");
+    let files = collect_files(&[fixture_path], &["py"], false).expect("Failed to collect files");
     assert!(files.len() >= 3, "Should collect multiple test fixture files");
 
     let result = detector.detect(&files, &config);
@@ -229,7 +229,7 @@ fn test_integration_empty_directory() {
     // Try to collect from a non-existent directory
     let nonexistent_path = PathBuf::from("/nonexistent/path/to/files");
 
-    let result = collect_files(&[nonexistent_path], &["py"]);
+    let result = collect_files(&[nonexistent_path], &["py"], false);
     assert!(result.is_err(), "Should fail for non-existent directory");
 }
 
@@ -239,7 +239,7 @@ fn test_integration_config_modes() {
     let fixture_path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/multiple_clones.py");
 
-    let files = collect_files(&[fixture_path], &["py"]).expect("Failed to collect files");
+    let files = collect_files(&[fixture_path], &["py"], false).expect("Failed to collect files");
 
     // Test Fast mode
     let fast_config = DetectionConfig::fast();

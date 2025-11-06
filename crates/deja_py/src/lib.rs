@@ -234,8 +234,8 @@ fn detect_clones(files: Vec<String>, config: Option<PyDetectionConfig>) -> PyRes
     // Convert string paths to PathBuf
     let paths: Vec<PathBuf> = files.iter().map(|f| PathBuf::from(f)).collect();
 
-    // Collect Python files
-    let source_files = collect_files(&paths, &["py"])
+    // Collect Python files (don't exclude tests by default for Python API)
+    let source_files = collect_files(&paths, &["py"], false)
         .map_err(|e| PyIOError::new_err(format!("Failed to collect files: {}", e)))?;
 
     // Create detector with Python tokenizer

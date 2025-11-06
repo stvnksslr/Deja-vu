@@ -49,6 +49,10 @@ enum Commands {
         /// Detection mode (fast, balanced, precise)
         #[arg(long, default_value = "balanced")]
         mode: String,
+
+        /// Exclude files with "test" in the name
+        #[arg(long)]
+        exclude_tests: bool,
     },
 
     /// Show version information
@@ -68,8 +72,9 @@ fn main() -> Result<()> {
             min_tokens,
             threshold,
             mode,
+            exclude_tests,
         } => {
-            check::run(paths, min_lines, min_tokens, threshold, &mode, &cli.format, cli.verbose)
+            check::run(paths, min_lines, min_tokens, threshold, &mode, &cli.format, cli.verbose, exclude_tests)
         }
         Commands::Version => {
             version::run();

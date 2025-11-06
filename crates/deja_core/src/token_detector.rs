@@ -4,7 +4,7 @@
 //! using rolling hashes and sliding windows.
 
 use crate::clone::{Clone, CloneGroup, CloneType};
-use crate::detector::{CloneDetector, DetectionConfig, DetectionMode};
+use crate::detector::{CloneDetector, DetectionConfig};
 use crate::hash::RollingHash;
 use crate::token::{LanguageTokenizer, Token, TokenType};
 use crate::SourceFile;
@@ -199,8 +199,9 @@ impl TokenBasedDetector {
                 }
             }
 
-            // Only keep groups with multiple instances
-            if group.size() >= 2 {
+            // Only keep groups with multiple instances from different files
+            // (clones within the same file are artifacts of the sliding window)
+            if group.size() >= 2 && self.has_multiple_files(&group) {
                 // Filter out common boilerplate patterns
                 if !self.is_boilerplate_pattern(&group) {
                     groups.push(group);
@@ -209,6 +210,16 @@ impl TokenBasedDetector {
         }
 
         groups
+    }
+
+    /// Check if a clone group has instances from multiple different files
+    fn has_multiple_files(&self, group: &CloneGroup) -> bool {
+        if group.instances.is_empty() {
+            return false;
+        }
+
+        let first_file = &group.instances[0].file;
+        group.instances.iter().any(|clone| &clone.file != first_file)
     }
 
     /// Extract content from source between offsets
@@ -311,15 +322,123 @@ impl TokenBasedDetector {
             line.starts_with("public ") ||
             line.starts_with("private ") ||
             line.starts_with("protected ") ||
-            *line == "pass" ||
-            *line == "{" ||
-            *line == "}" ||
+            **line == "pass" ||
+            **line == "{" ||
+            **line == "}" ||
             line.starts_with("//") ||
             line.starts_with("#")
         }).count();
 
         // If 70%+ of lines are structural, it's likely simple boilerplate
         structural_lines as f64 / lines.len() as f64 > 0.7
+    }
+
+    /// Merge overlapping clone groups that represent the same duplication
+    ///
+    /// When using a sliding window approach, we often detect many overlapping
+    /// windows of the same duplication. This method consolidates them into
+    /// single clone groups representing the full extent of each duplication.
+    fn merge_overlapping_clones(&self, groups: Vec<CloneGroup>) -> Vec<CloneGroup> {
+        if groups.is_empty() {
+            return groups;
+        }
+
+        let mut merged: Vec<CloneGroup> = Vec::new();
+        let mut used = vec![false; groups.len()];
+
+        for i in 0..groups.len() {
+            if used[i] {
+                continue;
+            }
+
+            // Start with this group as the base
+            let mut current_group = groups[i].clone();
+            used[i] = true;
+
+            // Try to merge with other groups
+            let mut merged_any = true;
+            while merged_any {
+                merged_any = false;
+
+                for j in 0..groups.len() {
+                    if used[j] || i == j {
+                        continue;
+                    }
+
+                    // Check if groups should be merged
+                    if self.should_merge_groups(&current_group, &groups[j]) {
+                        current_group = self.merge_two_groups(current_group, &groups[j]);
+                        used[j] = true;
+                        merged_any = true;
+                    }
+                }
+            }
+
+            merged.push(current_group);
+        }
+
+        // Filter out groups with less than 2 instances after merging
+        // (groups might have instances from the same file that got merged)
+        merged.into_iter().filter(|g| g.size() >= 2).collect()
+    }
+
+    /// Check if two clone groups should be merged (they represent overlapping detections)
+    fn should_merge_groups(&self, group1: &CloneGroup, group2: &CloneGroup) -> bool {
+        // Groups must have the same number of instances (same files involved)
+        if group1.instances.len() != group2.instances.len() {
+            return false;
+        }
+
+        // Count how many instances overlap
+        let mut overlap_count = 0;
+
+        for clone1 in &group1.instances {
+            for clone2 in &group2.instances {
+                if clone1.file == clone2.file && self.clones_overlap(clone1, clone2) {
+                    overlap_count += 1;
+                    break;
+                }
+            }
+        }
+
+        // If most instances overlap, these groups should be merged
+        // We use >= 50% threshold to handle cases where groups partially overlap
+        overlap_count as f64 / group1.instances.len() as f64 >= 0.5
+    }
+
+    /// Check if two clones overlap in their line ranges
+    fn clones_overlap(&self, clone1: &Clone, clone2: &Clone) -> bool {
+        // Clones overlap if the maximum start is less than or equal to minimum end
+        let overlap_start = clone1.start_line.max(clone2.start_line);
+        let overlap_end = clone1.end_line.min(clone2.end_line);
+
+        overlap_start <= overlap_end
+    }
+
+    /// Merge two clone groups by taking the union of their instances
+    /// and extending boundaries to cover the full extent
+    fn merge_two_groups(&self, mut group1: CloneGroup, group2: &CloneGroup) -> CloneGroup {
+        // For each file, find the corresponding clones and merge them
+        for clone2 in &group2.instances {
+            // Find matching clone in group1 (same file)
+            if let Some(clone1) = group1.instances.iter_mut().find(|c| c.file == clone2.file) {
+                // Extend boundaries to cover both clones
+                clone1.start_line = clone1.start_line.min(clone2.start_line);
+                clone1.end_line = clone1.end_line.max(clone2.end_line);
+                clone1.start_col = clone1.start_col.min(clone2.start_col);
+                clone1.end_col = clone1.end_col.max(clone2.end_col);
+
+                // Use the content from the larger clone (more complete)
+                if clone2.content.len() > clone1.content.len() {
+                    clone1.content = clone2.content.clone();
+                }
+            } else {
+                // This clone is in a file not yet in group1, add it
+                group1.instances.push(clone2.clone());
+            }
+        }
+
+        group1
     }
 }
 
@@ -337,7 +456,10 @@ impl CloneDetector for TokenBasedDetector {
         // Step 2: Extend candidates to find full clone regions
         let groups = self.extend_candidates(candidates, files, config);
 
-        Ok(groups)
+        // Step 3: Merge overlapping clone groups
+        let merged_groups = self.merge_overlapping_clones(groups);
+
+        Ok(merged_groups)
     }
 
     fn name(&self) -> &str {
@@ -374,6 +496,7 @@ struct NormalizedToken {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::detector::DetectionMode;
     use crate::token::{LanguageTokenizer, TokenizationError};
     use std::path::PathBuf;
 
@@ -622,5 +745,244 @@ mod tests {
 
         // Should not find clones because code is too short
         assert_eq!(groups.len(), 0);
+    }
+
+    #[test]
+    fn test_clones_overlap() {
+        let detector = TokenBasedDetector::new();
+
+        // Test overlapping clones
+        let clone1 = Clone::new(
+            PathBuf::from("test.rs"),
+            1, 10,
+            0, 0,
+            "content".to_string(),
+        );
+        let clone2 = Clone::new(
+            PathBuf::from("test.rs"),
+            5, 15,
+            0, 0,
+            "content".to_string(),
+        );
+        assert!(detector.clones_overlap(&clone1, &clone2));
+
+        // Test non-overlapping clones
+        let clone3 = Clone::new(
+            PathBuf::from("test.rs"),
+            20, 30,
+            0, 0,
+            "content".to_string(),
+        );
+        assert!(!detector.clones_overlap(&clone1, &clone3));
+
+        // Test adjacent clones (should overlap at boundary)
+        let clone4 = Clone::new(
+            PathBuf::from("test.rs"),
+            10, 20,
+            0, 0,
+            "content".to_string(),
+        );
+        assert!(detector.clones_overlap(&clone1, &clone4));
+    }
+
+    #[test]
+    fn test_should_merge_groups() {
+        let detector = TokenBasedDetector::new();
+
+        // Create two groups with overlapping instances in the same files
+        let mut group1 = CloneGroup::new(CloneType::Type1, 1.0, "hash1".to_string());
+        group1.add_instance(Clone::new(
+            PathBuf::from("file1.rs"),
+            1, 10,
+            0, 0,
+            "content".to_string(),
+        ));
+        group1.add_instance(Clone::new(
+            PathBuf::from("file2.rs"),
+            1, 10,
+            0, 0,
+            "content".to_string(),
+        ));
+
+        let mut group2 = CloneGroup::new(CloneType::Type1, 1.0, "hash2".to_string());
+        group2.add_instance(Clone::new(
+            PathBuf::from("file1.rs"),
+            5, 15,
+            0, 0,
+            "content".to_string(),
+        ));
+        group2.add_instance(Clone::new(
+            PathBuf::from("file2.rs"),
+            5, 15,
+            0, 0,
+            "content".to_string(),
+        ));
+
+        // Should merge because they overlap in both files
+        assert!(detector.should_merge_groups(&group1, &group2));
+
+        // Create a group with different files - should not merge
+        let mut group3 = CloneGroup::new(CloneType::Type1, 1.0, "hash3".to_string());
+        group3.add_instance(Clone::new(
+            PathBuf::from("file3.rs"),
+            1, 10,
+            0, 0,
+            "content".to_string(),
+        ));
+
+        assert!(!detector.should_merge_groups(&group1, &group3));
+    }
+
+    #[test]
+    fn test_merge_overlapping_clones() {
+        let detector = TokenBasedDetector::new();
+
+        // Create overlapping groups with instances in multiple files
+        let mut group1 = CloneGroup::new(CloneType::Type1, 1.0, "hash1".to_string());
+        group1.add_instance(Clone::new(
+            PathBuf::from("file1.rs"),
+            1, 10,
+            0, 50,
+            "content1".to_string(),
+        ));
+        group1.add_instance(Clone::new(
+            PathBuf::from("file2.rs"),
+            1, 10,
+            0, 50,
+            "content1".to_string(),
+        ));
+
+        let mut group2 = CloneGroup::new(CloneType::Type1, 1.0, "hash2".to_string());
+        group2.add_instance(Clone::new(
+            PathBuf::from("file1.rs"),
+            5, 15,
+            0, 50,
+            "longer content2".to_string(),
+        ));
+        group2.add_instance(Clone::new(
+            PathBuf::from("file2.rs"),
+            5, 15,
+            0, 50,
+            "longer content2".to_string(),
+        ));
+
+        let groups = vec![group1, group2];
+        let merged = detector.merge_overlapping_clones(groups);
+
+        // Should merge into one group
+        assert_eq!(merged.len(), 1);
+
+        // The merged group should have extended boundaries in both files
+        let file1_clone = merged[0].instances.iter().find(|c| c.file == PathBuf::from("file1.rs")).unwrap();
+        assert_eq!(file1_clone.start_line, 1);  // min of 1 and 5
+        assert_eq!(file1_clone.end_line, 15);   // max of 10 and 15
+        assert_eq!(file1_clone.content, "longer content2");
+
+        let file2_clone = merged[0].instances.iter().find(|c| c.file == PathBuf::from("file2.rs")).unwrap();
+        assert_eq!(file2_clone.start_line, 1);
+        assert_eq!(file2_clone.end_line, 15);
+    }
+
+    #[test]
+    fn test_merge_non_overlapping_clones() {
+        let detector = TokenBasedDetector::new();
+
+        // Create non-overlapping groups with instances in multiple files
+        let mut group1 = CloneGroup::new(CloneType::Type1, 1.0, "hash1".to_string());
+        group1.add_instance(Clone::new(
+            PathBuf::from("file1.rs"),
+            1, 10,
+            0, 0,
+            "content1".to_string(),
+        ));
+        group1.add_instance(Clone::new(
+            PathBuf::from("file2.rs"),
+            1, 10,
+            0, 0,
+            "content1".to_string(),
+        ));
+
+        let mut group2 = CloneGroup::new(CloneType::Type1, 1.0, "hash2".to_string());
+        group2.add_instance(Clone::new(
+            PathBuf::from("file1.rs"),
+            20, 30,
+            0, 0,
+            "content2".to_string(),
+        ));
+        group2.add_instance(Clone::new(
+            PathBuf::from("file2.rs"),
+            20, 30,
+            0, 0,
+            "content2".to_string(),
+        ));
+
+        let groups = vec![group1, group2];
+        let merged = detector.merge_overlapping_clones(groups);
+
+        // Should keep as separate groups since they don't overlap
+        assert_eq!(merged.len(), 2);
+    }
+
+    #[test]
+    fn test_merge_multiple_overlapping_groups() {
+        let detector = TokenBasedDetector::new();
+
+        // Create three overlapping groups with instances in multiple files
+        let mut group1 = CloneGroup::new(CloneType::Type1, 1.0, "hash1".to_string());
+        group1.add_instance(Clone::new(
+            PathBuf::from("file1.rs"),
+            1, 10,
+            0, 0,
+            "content1".to_string(),
+        ));
+        group1.add_instance(Clone::new(
+            PathBuf::from("file2.rs"),
+            1, 10,
+            0, 0,
+            "content1".to_string(),
+        ));
+
+        let mut group2 = CloneGroup::new(CloneType::Type1, 1.0, "hash2".to_string());
+        group2.add_instance(Clone::new(
+            PathBuf::from("file1.rs"),
+            5, 15,
+            0, 0,
+            "content2".to_string(),
+        ));
+        group2.add_instance(Clone::new(
+            PathBuf::from("file2.rs"),
+            5, 15,
+            0, 0,
+            "content2".to_string(),
+        ));
+
+        let mut group3 = CloneGroup::new(CloneType::Type1, 1.0, "hash3".to_string());
+        group3.add_instance(Clone::new(
+            PathBuf::from("file1.rs"),
+            10, 20,
+            0, 0,
+            "content3".to_string(),
+        ));
+        group3.add_instance(Clone::new(
+            PathBuf::from("file2.rs"),
+            10, 20,
+            0, 0,
+            "content3".to_string(),
+        ));
+
+        let groups = vec![group1, group2, group3];
+        let merged = detector.merge_overlapping_clones(groups);
+
+        // All three should merge into one
+        assert_eq!(merged.len(), 1);
+
+        // The merged group should span from 1 to 20 in both files
+        let file1_clone = merged[0].instances.iter().find(|c| c.file == PathBuf::from("file1.rs")).unwrap();
+        assert_eq!(file1_clone.start_line, 1);
+        assert_eq!(file1_clone.end_line, 20);
+
+        let file2_clone = merged[0].instances.iter().find(|c| c.file == PathBuf::from("file2.rs")).unwrap();
+        assert_eq!(file2_clone.start_line, 1);
+        assert_eq!(file2_clone.end_line, 20);
     }
 }
