@@ -1,0 +1,48 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/deja_core",
+    "crates/deja_ast",
+    "crates/deja_python",
+    "crates/deja_cli",
+    "crates/deja_py",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+authors = ["Deja-vu Contributors"]
+license = "MIT"
+repository = "https://github.com/stvnksslr/Deja-vu"
+homepage = "https://github.com/stvnksslr/Deja-vu"
+description = "An extremely fast code duplication detector, inspired by Ruff"
+
+[workspace.dependencies]
+# Core dependencies
+anyhow = "1.0"
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rustc-hash = "2.0"
+
+# CLI dependencies
+clap = { version = "4.5", features = ["derive"] }
+colored = "2.1"
+
+# Python bindings
+pyo3 = { version = "0.22", features = ["extension-module"] }
+
+# Performance
+rayon = "1.10"
+dashmap = "6.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

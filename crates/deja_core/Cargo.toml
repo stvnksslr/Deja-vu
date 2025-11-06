@@ -1,0 +1,26 @@
+[package]
+name = "deja_core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Core clone detection algorithms for Deja-vu"
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rustc-hash.workspace = true
+rayon.workspace = true
+dashmap.workspace = true
+
+[dev-dependencies]
+criterion = "0.5"
+
+# Benchmarks disabled until implemented
+# [[bench]]
+# name = "detection"
+# harness = false

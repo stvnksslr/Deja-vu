@@ -1,0 +1,21 @@
+[package]
+name = "deja_py"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Python bindings for Deja-vu"
+
+[lib]
+name = "deja_vu"
+crate-type = ["cdylib"]
+
+[dependencies]
+deja_core = { path = "../deja_core" }
+deja_ast = { path = "../deja_ast" }
+deja_python = { path = "../deja_python" }
+pyo3.workspace = true
+serde.workspace = true
+serde_json.workspace = true

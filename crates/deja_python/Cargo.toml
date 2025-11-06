@@ -1,0 +1,21 @@
+[package]
+name = "deja_python"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Python language support for Deja-vu"
+
+[dependencies]
+deja_ast = { path = "../deja_ast" }
+deja_core = { path = "../deja_core" }
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+
+# Python parser
+ruff_python_parser = "0.8"
+ruff_python_ast = "0.8"
+ruff_text_size = "0.8"
