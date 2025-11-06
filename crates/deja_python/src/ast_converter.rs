@@ -3,20 +3,20 @@
 //! This module converts Ruff's Python AST to our generic AST representation
 //! for language-agnostic clone detection.
 
-use deja_ast::{Ast, AstNode, NodeKind, Span, ToGenericAst, AstError};
+use deja_ast::{Ast, AstNode, NodeKind, Span, AstError};
 use ruff_python_ast as ast;
-use ruff_python_parser::{parse, Mode};
-use ruff_text_size::TextSize;
+use ruff_python_parser::{parse, Mode, ParseOptions};
+use ruff_text_size::Ranged;
 
 /// Converts Python source code to a generic AST
 pub fn parse_python_to_generic_ast(source: &str, source_file: &str) -> Result<Ast, AstError> {
-    // Parse the Python source code
-    let parsed = parse(source, Mode::Module)
+    // Parse the Python source code using Ruff's parser
+    let parsed = parse(source, ParseOptions::from(Mode::Module))
         .map_err(|e| AstError::ParseError(format!("Failed to parse Python: {:?}", e)))?;
 
     // Convert to generic AST
     let mut converter = PythonAstConverter::new(source, source_file);
-    converter.convert(&parsed)
+    converter.convert(&parsed.into_syntax())
 }
 
 /// Converter from Ruff Python AST to Generic AST
@@ -116,8 +116,8 @@ impl<'a> PythonAstConverter<'a> {
                 let mut func_children = Vec::new();
 
                 // Add parameters
-                for param in &func.parameters.args {
-                    if let Some(param_id) = self.convert_parameter(param) {
+                for param_with_default in &func.parameters.args {
+                    if let Some(param_id) = self.convert_parameter(&param_with_default.parameter) {
                         func_children.push(param_id);
                     }
                 }
@@ -244,7 +244,7 @@ impl<'a> PythonAstConverter<'a> {
 
     fn convert_parameter(&mut self, param: &ast::Parameter) -> Option<usize> {
         let id = self.next_id();
-        let span = self.create_span(param.range);
+        let span = self.create_span(param.range());
 
         let node = AstNode::new(id, NodeKind::Parameter, span)
             .with_text(param.name.to_string());
