@@ -201,7 +201,10 @@ impl TokenBasedDetector {
 
             // Only keep groups with multiple instances
             if group.size() >= 2 {
-                groups.push(group);
+                // Filter out common boilerplate patterns
+                if !self.is_boilerplate_pattern(&group) {
+                    groups.push(group);
+                }
             }
         }
 
@@ -214,6 +217,109 @@ impl TokenBasedDetector {
             .get(start..end)
             .unwrap_or("")
             .to_string()
+    }
+
+    /// Check if a clone group represents common boilerplate code
+    fn is_boilerplate_pattern(&self, group: &CloneGroup) -> bool {
+        // Skip if we don't have instances to check
+        if group.instances.is_empty() {
+            return false;
+        }
+
+        let content = &group.instances[0].content;
+        let trimmed = content.trim();
+
+        // Filter out import-only blocks
+        if self.is_import_block(trimmed) {
+            return true;
+        }
+
+        // Filter out simple test class setup boilerplate
+        if self.is_test_boilerplate(trimmed) {
+            return true;
+        }
+
+        // Filter out simple class/function declarations with minimal body
+        if self.is_simple_declaration(trimmed) {
+            return true;
+        }
+
+        false
+    }
+
+    /// Check if content is primarily imports
+    fn is_import_block(&self, content: &str) -> bool {
+        let lines: Vec<&str> = content.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+
+        if lines.is_empty() {
+            return false;
+        }
+
+        // Count import-related lines
+        let import_lines = lines.iter().filter(|line| {
+            line.starts_with("import ") ||
+            line.starts_with("from ") ||
+            line.starts_with("using ") ||
+            line.starts_with("#include") ||
+            line.starts_with("require(") ||
+            line.starts_with("use ")
+        }).count();
+
+        // If 80%+ of non-empty lines are imports, it's boilerplate
+        import_lines as f64 / lines.len() as f64 > 0.8
+    }
+
+    /// Check if content is test boilerplate (simple class/function setup)
+    fn is_test_boilerplate(&self, content: &str) -> bool {
+        let lines: Vec<&str> = content.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+
+        if lines.len() > 10 {
+            return false; // Too long to be simple boilerplate
+        }
+
+        // Common test boilerplate patterns
+        let test_patterns = [
+            "class Test",
+            "class test",
+            "def test_",
+            "def setUp",
+            "def tearDown",
+            "TestCase",
+            "@pytest",
+            "@unittest",
+        ];
+
+        let has_test_pattern = test_patterns.iter().any(|pattern| content.contains(pattern));
+
+        // If it has test patterns and is short, likely boilerplate
+        has_test_pattern && lines.len() <= 8
+    }
+
+    /// Check if content is a simple declaration (class/function header with minimal logic)
+    fn is_simple_declaration(&self, content: &str) -> bool {
+        let lines: Vec<&str> = content.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+
+        if lines.is_empty() || lines.len() > 12 {
+            return false;
+        }
+
+        // Count lines that are just structural (declarations, pass, comments, braces)
+        let structural_lines = lines.iter().filter(|line| {
+            line.starts_with("class ") ||
+            line.starts_with("def ") ||
+            line.starts_with("function ") ||
+            line.starts_with("public ") ||
+            line.starts_with("private ") ||
+            line.starts_with("protected ") ||
+            *line == "pass" ||
+            *line == "{" ||
+            *line == "}" ||
+            line.starts_with("//") ||
+            line.starts_with("#")
+        }).count();
+
+        // If 70%+ of lines are structural, it's likely simple boilerplate
+        structural_lines as f64 / lines.len() as f64 > 0.7
     }
 }
 
