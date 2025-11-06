@@ -28,6 +28,12 @@ impl Default for EditCosts {
     }
 }
 
+/// Maximum recursion depth to prevent stack overflow
+const MAX_RECURSION_DEPTH: usize = 100;
+
+/// Maximum tree size to compare (prevents comparing huge subtrees)
+const MAX_TREE_SIZE: usize = 500;
+
 /// Calculates the tree edit distance between two AST subtrees
 pub fn tree_edit_distance(
     ast1: &Ast,
@@ -36,6 +42,24 @@ pub fn tree_edit_distance(
     node2_id: usize,
     costs: &EditCosts,
 ) -> f64 {
+    tree_edit_distance_with_depth(ast1, node1_id, ast2, node2_id, costs, 0)
+}
+
+/// Internal function with depth tracking to prevent stack overflow
+fn tree_edit_distance_with_depth(
+    ast1: &Ast,
+    node1_id: usize,
+    ast2: &Ast,
+    node2_id: usize,
+    costs: &EditCosts,
+    depth: usize,
+) -> f64 {
+    // Prevent stack overflow by limiting recursion depth
+    if depth > MAX_RECURSION_DEPTH {
+        // Return a large distance to indicate these trees are too different to compare safely
+        return 1000.0;
+    }
+
     let node1 = ast1.get_node(node1_id);
     let node2 = ast2.get_node(node2_id);
 
@@ -45,19 +69,27 @@ pub fn tree_edit_distance(
 
     if node1.is_none() {
         // Need to insert all nodes in tree2
-        return count_nodes(ast2, node2_id) as f64 * costs.insert;
+        let size = count_nodes(ast2, node2_id);
+        if size > MAX_TREE_SIZE {
+            return 1000.0; // Too large, bail out
+        }
+        return size as f64 * costs.insert;
     }
 
     if node2.is_none() {
         // Need to delete all nodes in tree1
-        return count_nodes(ast1, node1_id) as f64 * costs.delete;
+        let size = count_nodes(ast1, node1_id);
+        if size > MAX_TREE_SIZE {
+            return 1000.0; // Too large, bail out
+        }
+        return size as f64 * costs.delete;
     }
 
     let node1 = node1.unwrap();
     let node2 = node2.unwrap();
 
     // Use dynamic programming to compute edit distance
-    compute_edit_distance_dp(ast1, node1, ast2, node2, costs)
+    compute_edit_distance_dp(ast1, node1, ast2, node2, costs, depth)
 }
 
 /// Compute edit distance using dynamic programming
@@ -67,6 +99,7 @@ fn compute_edit_distance_dp(
     ast2: &Ast,
     node2: &AstNode,
     costs: &EditCosts,
+    depth: usize,
 ) -> f64 {
     let children1 = &node1.children;
     let children2 = &node2.children;
@@ -80,6 +113,13 @@ fn compute_edit_distance_dp(
 
     if children1.is_empty() && children2.is_empty() {
         return update_cost;
+    }
+
+    // Limit the number of children to compare to prevent explosion
+    let max_children = 20;
+    if children1.len() > max_children || children2.len() > max_children {
+        // Too many children, use simplified comparison
+        return update_cost + (children1.len().abs_diff(children2.len()) as f64 * costs.insert);
     }
 
     // If one tree has no children, calculate cost of inserting/deleting all children
@@ -116,8 +156,8 @@ fn compute_edit_distance_dp(
             let child1_id = children1[i - 1];
             let child2_id = children2[j - 1];
 
-            // Cost of updating child i to child j
-            let match_cost = tree_edit_distance(ast1, child1_id, ast2, child2_id, costs);
+            // Cost of updating child i to child j (recursive call with incremented depth)
+            let match_cost = tree_edit_distance_with_depth(ast1, child1_id, ast2, child2_id, costs, depth + 1);
 
             // Minimum of: match/update, delete child1[i], insert child2[j]
             dp[i][j] = (dp[i - 1][j - 1] + match_cost)

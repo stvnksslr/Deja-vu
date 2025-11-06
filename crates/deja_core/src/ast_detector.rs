@@ -50,13 +50,14 @@ impl AstBasedDetector {
     /// Extract all meaningful subtrees from an AST
     fn extract_subtrees(&self, ast: &Ast, min_nodes: usize) -> Vec<SubtreeInfo> {
         let mut subtrees = Vec::new();
+        const MAX_SUBTREE_SIZE: usize = 500; // Prevent comparing huge subtrees
 
         // Walk the AST and extract subtrees that are large enough
         for node in &ast.nodes {
             let size = count_subtree_nodes(ast, node.id);
 
-            // Only include subtrees above minimum size
-            if size >= min_nodes {
+            // Only include subtrees above minimum size and below maximum size
+            if size >= min_nodes && size <= MAX_SUBTREE_SIZE {
                 // Skip trivial nodes that are likely boilerplate
                 if !self.is_trivial_subtree(ast, node.id) {
                     subtrees.push(SubtreeInfo {
