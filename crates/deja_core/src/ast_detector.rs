@@ -53,6 +53,9 @@ impl AstBasedDetector {
         const MAX_SUBTREE_SIZE: usize = 500; // Prevent comparing huge subtrees
         const MAX_SUBTREES_PER_FILE: usize = 100; // Limit subtrees per file
 
+        // Enforce reasonable minimum to prevent memory exhaustion
+        let effective_min_nodes = min_nodes.max(5);
+
         // Only look at function and class nodes, not every node
         // This dramatically reduces the number of comparisons
         for node in &ast.nodes {
@@ -71,11 +74,10 @@ impl AstBasedDetector {
             let size = count_subtree_nodes(ast, node.id);
 
             // Only include subtrees above minimum size and below maximum size
-            if size >= min_nodes && size <= MAX_SUBTREE_SIZE {
+            if size >= effective_min_nodes && size <= MAX_SUBTREE_SIZE {
                 // Skip trivial nodes that are likely boilerplate
                 if !self.is_trivial_subtree(ast, node.id) {
                     subtrees.push(SubtreeInfo {
-                        ast: ast.clone(),
                         root_id: node.id,
                         size,
                         hash: self.hash_subtree(ast, node.id),
@@ -136,13 +138,14 @@ impl AstBasedDetector {
     }
 
     /// Find clone candidates using hash-based filtering
+    /// Returns (candidates, parsed_files) where parsed_files contains (SourceFile, Ast) pairs
     fn find_candidates(
         &self,
         files: &[SourceFile],
         config: &DetectionConfig,
-    ) -> Result<Vec<CandidatePair>> {
-        // Parse all files to ASTs
-        let asts: Vec<(SourceFile, Ast)> = files
+    ) -> Result<(Vec<CandidatePair>, Vec<(SourceFile, Ast)>)> {
+        // Parse all files to ASTs, keeping source files alongside
+        let parsed_files: Vec<(SourceFile, Ast)> = files
             .par_iter()
             .filter_map(|file| {
                 match self.parse_file(file) {
@@ -154,7 +157,7 @@ impl AstBasedDetector {
 
         // Extract all subtrees
         let min_nodes = config.min_nodes;
-        let all_subtrees: Vec<(usize, SubtreeInfo)> = asts
+        let all_subtrees: Vec<(usize, SubtreeInfo)> = parsed_files
             .par_iter()
             .enumerate()
             .flat_map_iter(|(file_idx, (_file, ast))| {
@@ -196,14 +199,14 @@ impl AstBasedDetector {
             }
         }
 
-        Ok(candidates)
+        Ok((candidates, parsed_files))
     }
 
     /// Compare candidate pairs and create clone groups
     fn compare_candidates(
         &self,
         candidates: Vec<CandidatePair>,
-        files: &[SourceFile],
+        parsed_files: &[(SourceFile, Ast)],
         config: &DetectionConfig,
     ) -> Vec<CloneGroup> {
         let costs = EditCosts::default();
@@ -212,8 +215,9 @@ impl AstBasedDetector {
         let clone_pairs: Vec<ClonePair> = candidates
             .par_iter()
             .filter_map(|candidate| {
-                let ast1 = &candidate.subtree1.ast;
-                let ast2 = &candidate.subtree2.ast;
+                // Look up ASTs by file index
+                let ast1 = &parsed_files[candidate.file1_idx].1;
+                let ast2 = &parsed_files[candidate.file2_idx].1;
 
                 let distance = tree_edit_distance(
                     ast1,
@@ -245,23 +249,24 @@ impl AstBasedDetector {
             .collect();
 
         // Group similar clone pairs into clone groups
-        self.group_clones(clone_pairs, files)
+        self.group_clones(clone_pairs, parsed_files)
     }
 
     /// Group clone pairs into clone groups
-    fn group_clones(&self, pairs: Vec<ClonePair>, files: &[SourceFile]) -> Vec<CloneGroup> {
+    fn group_clones(&self, pairs: Vec<ClonePair>, parsed_files: &[(SourceFile, Ast)]) -> Vec<CloneGroup> {
         let mut groups = Vec::new();
 
         // Simple grouping by similarity score ranges
         // TODO: More sophisticated clustering algorithm
         for pair in pairs {
-            let node1 = pair.subtree1.ast.get_node(pair.subtree1.root_id);
-            let node2 = pair.subtree2.ast.get_node(pair.subtree2.root_id);
+            // Look up file and AST by index
+            let (file1, ast1) = &parsed_files[pair.file1_idx];
+            let (file2, ast2) = &parsed_files[pair.file2_idx];
+
+            let node1 = ast1.get_node(pair.subtree1.root_id);
+            let node2 = ast2.get_node(pair.subtree2.root_id);
 
             if let (Some(n1), Some(n2)) = (node1, node2) {
-                let file1 = &files[pair.file1_idx];
-                let file2 = &files[pair.file2_idx];
-
                 let clone1 = Clone::new(
                     file1.path.clone(),
                     n1.span.line_start,
@@ -312,11 +317,11 @@ impl Default for AstBasedDetector {
 
 impl CloneDetector for AstBasedDetector {
     fn detect(&self, files: &[SourceFile], config: &DetectionConfig) -> Result<Vec<CloneGroup>> {
-        // Find candidate clone pairs
-        let candidates = self.find_candidates(files, config)?;
+        // Find candidate clone pairs and parsed files
+        let (candidates, parsed_files) = self.find_candidates(files, config)?;
 
         // Compare candidates and create groups
-        let groups = self.compare_candidates(candidates, files, config);
+        let groups = self.compare_candidates(candidates, &parsed_files, config);
 
         Ok(groups)
     }
@@ -330,10 +335,9 @@ impl CloneDetector for AstBasedDetector {
     }
 }
 
-/// Information about a subtree
+/// Information about a subtree (does not clone AST to save memory)
 #[derive(Debug, Clone)]
 struct SubtreeInfo {
-    ast: Ast,
     root_id: usize,
     size: usize,
     hash: u64,
