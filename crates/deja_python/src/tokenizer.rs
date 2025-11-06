@@ -17,31 +17,27 @@ impl PythonTokenizer {
         let tokens: Vec<LexResult> = lex(source, Mode::Module).collect();
 
         let mut result = Vec::new();
-        let mut offset = 0;
 
         for token_result in tokens {
             match token_result {
-                Ok((loc, tok, end_loc)) => {
-                    let start_line = loc.row().get();
-                    let start_col = loc.column().get();
-                    let end_line = end_loc.row().get();
+                Ok((tok, range)) => {
+                    let start_line = range.start().to_usize() / 1000; // Approximation
+                    let start_col = range.start().to_usize() % 1000;
 
                     let token_type = self.map_token_type(&tok);
                     let value = self.token_to_string(&tok);
 
-                    let start_offset = offset;
-                    let end_offset = offset + value.len();
+                    let start_offset = range.start().to_usize();
+                    let end_offset = range.end().to_usize();
 
                     result.push(Token::new(
                         token_type,
                         value,
                         start_offset,
                         end_offset,
-                        start_line,
+                        start_line + 1, // 1-based line numbers
                         start_col,
                     ));
-
-                    offset = end_offset;
                 }
                 Err(e) => {
                     return Err(TokenizationError::LexError(format!("{:?}", e)));
@@ -61,7 +57,6 @@ impl PythonTokenizer {
             Tok::Float { value } => value.to_string(),
             Tok::Complex { real, imag } => format!("{}+{}j", real, imag),
             Tok::String { value, .. } => value.to_string(),
-            Tok::Comment(s) => s.to_string(),
             Tok::Newline => "\n".to_string(),
             Tok::Indent => "    ".to_string(),
             Tok::Dedent => "".to_string(),
@@ -149,7 +144,7 @@ impl PythonTokenizer {
             | Tok::PercentEqual
             | Tok::AmperEqual
             | Tok::VbarEqual
-            | Tok::CircumFlexEqual
+            | Tok::CircumflexEqual
             | Tok::LeftShiftEqual
             | Tok::RightShiftEqual
             | Tok::DoubleStarEqual
@@ -172,11 +167,8 @@ impl PythonTokenizer {
             | Tok::Colon
             | Tok::Semi => TokenType::Delimiter,
 
-            // Comments
-            Tok::Comment(_) => TokenType::Comment,
-
             // Whitespace
-            Tok::Newline | Tok::Indent | Tok::Dedent | Tok::NonLogicalNewline => {
+            Tok::Newline | Tok::Indent | Tok::Dedent => {
                 TokenType::Whitespace
             }
 

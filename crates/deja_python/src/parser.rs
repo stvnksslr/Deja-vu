@@ -21,7 +21,7 @@ impl PythonParser {
 
     fn convert_to_generic_ast(
         &self,
-        module: rustpython_parser::ast::Suite,
+        _module: rustpython_parser::ast::Mod,
         _source: &str,
         filename: &str,
     ) -> Result<Ast, AstError> {

@@ -4,9 +4,9 @@
 //! using rolling hashes and sliding windows.
 
 use crate::clone::{Clone, CloneGroup, CloneType};
-use crate::detector::{CloneDetector, DetectionConfig};
-use crate::hash::{hash_tokens, RollingHash};
-use crate::token::{LanguageTokenizer, Token, TokenSequence, TokenType};
+use crate::detector::{CloneDetector, DetectionConfig, DetectionMode};
+use crate::hash::RollingHash;
+use crate::token::{LanguageTokenizer, Token, TokenType};
 use crate::SourceFile;
 use anyhow::Result;
 use dashmap::DashMap;
@@ -129,8 +129,9 @@ impl TokenBasedDetector {
 
         // Convert DashMap to HashMap
         let result: HashMap<u64, Vec<CloneCandidate>> = hash_map
-            .into_iter()
-            .filter(|(_, candidates)| candidates.len() > 1) // Only keep hashes with multiple occurrences
+            .iter()
+            .filter(|entry| entry.value().len() > 1) // Only keep hashes with multiple occurrences
+            .map(|entry| (*entry.key(), entry.value().clone()))
             .collect();
 
         Ok(result)

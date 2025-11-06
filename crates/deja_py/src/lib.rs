@@ -164,8 +164,8 @@ impl PyClone {
         format!(
             "Clone(file='{}', lines={}-{}, {} lines)",
             self.file(),
-            self.start_line,
-            self.end_line,
+            self.start_line(),
+            self.end_line(),
             self.line_count()
         )
     }
@@ -214,7 +214,7 @@ impl PyCloneGroup {
             "CloneGroup(type={}, instances={}, similarity={:.2})",
             self.clone_type(),
             self.size(),
-            self.similarity
+            self.similarity()
         )
     }
 
