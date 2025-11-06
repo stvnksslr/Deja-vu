@@ -138,7 +138,7 @@ impl AstBasedDetector {
             .collect();
 
         // Extract all subtrees
-        let min_nodes = config.min_tokens / 5; // Rough heuristic: tokens ~= 5 * nodes
+        let min_nodes = config.min_nodes;
         let all_subtrees: Vec<(usize, SubtreeInfo)> = asts
             .par_iter()
             .enumerate()

@@ -39,9 +39,13 @@ enum Commands {
         #[arg(long, default_value = "4")]
         min_lines: usize,
 
-        /// Minimum number of tokens for a clone
+        /// Minimum number of tokens for a clone (token-based detection)
         #[arg(long, default_value = "20")]
         min_tokens: usize,
+
+        /// Minimum number of AST nodes for a clone (AST-based detection)
+        #[arg(long, default_value = "10")]
+        min_nodes: usize,
 
         /// Similarity threshold (0.0 to 1.0)
         #[arg(long, default_value = "0.85")]
@@ -83,6 +87,7 @@ fn main() -> Result<()> {
             paths,
             min_lines,
             min_tokens,
+            min_nodes,
             threshold,
             mode,
             exclude_tests,
@@ -93,6 +98,7 @@ fn main() -> Result<()> {
             paths,
             min_lines,
             min_tokens,
+            min_nodes,
             threshold,
             &mode,
             &cli.format,

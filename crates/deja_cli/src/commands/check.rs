@@ -5,10 +5,10 @@ use crate::sarif::SarifReport;
 use anyhow::Result;
 use colored::*;
 use deja_core::{
-    collect_files, file_statistics, CloneDetector, DetectionConfig, DetectionMode,
-    TokenBasedDetector,
+    collect_files, file_statistics, AstBasedDetector, CloneDetector, DetectionConfig,
+    DetectionMode, TokenBasedDetector,
 };
-use deja_python::PythonTokenizer;
+use deja_python::{PythonAstParser, PythonTokenizer};
 use std::path::PathBuf;
 use std::process;
 use std::time::Instant;
@@ -17,6 +17,7 @@ pub fn run(
     paths: Vec<PathBuf>,
     min_lines: usize,
     min_tokens: usize,
+    min_nodes: usize,
     threshold: f64,
     mode: &str,
     format: &str,
@@ -51,6 +52,7 @@ pub fn run(
         mode: detection_mode,
         min_lines,
         min_tokens,
+        min_nodes,
         similarity_threshold: threshold,
         ignore_comments: true,
         ignore_whitespace: true,
@@ -61,6 +63,7 @@ pub fn run(
         println!("  Mode: {:?}", config.mode);
         println!("  Min lines: {}", config.min_lines);
         println!("  Min tokens: {}", config.min_tokens);
+        println!("  Min nodes: {}", config.min_nodes);
         println!("  Threshold: {:.2}", config.similarity_threshold);
         println!("  Format: {}", format);
         println!();
@@ -83,17 +86,26 @@ pub fn run(
     println!("  Collected in {:.2}s", start.elapsed().as_secs_f64());
     println!();
 
-    // Create detector with Python tokenizer
-    let mut detector = TokenBasedDetector::new();
-    detector.register_tokenizer("python".to_string(), Box::new(PythonTokenizer::new()));
-
-    // Run detection
+    // Create detector based on mode
     println!("Analyzing code for duplicates...");
     let detect_start = Instant::now();
 
-    let clone_groups = detector.detect(&files, &config)?;
-    let has_clones = !clone_groups.is_empty();
+    let clone_groups = match detection_mode {
+        DetectionMode::Fast => {
+            // Use token-based detector for fast mode
+            let mut detector = TokenBasedDetector::new();
+            detector.register_tokenizer("python".to_string(), Box::new(PythonTokenizer::new()));
+            detector.detect(&files, &config)?
+        }
+        DetectionMode::Balanced | DetectionMode::Precise => {
+            // Use AST-based detector for balanced and precise modes
+            let mut detector = AstBasedDetector::new();
+            detector.register_parser("python".to_string(), Box::new(PythonAstParser::new()));
+            detector.detect(&files, &config)?
+        }
+    };
 
+    let has_clones = !clone_groups.is_empty();
     let duration = detect_start.elapsed();
 
     // Display results
