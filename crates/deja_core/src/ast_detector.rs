@@ -56,11 +56,6 @@ impl AstBasedDetector {
         // Enforce reasonable minimum to prevent memory exhaustion
         let effective_min_nodes = min_nodes.max(5);
 
-        let mut function_count = 0;
-        let mut too_small_count = 0;
-        let mut too_large_count = 0;
-        let mut trivial_count = 0;
-
         // Only look at function and class nodes, not every node
         // This dramatically reduces the number of comparisons
         for node in &ast.nodes {
@@ -72,47 +67,23 @@ impl AstBasedDetector {
                 continue;
             }
 
-            function_count += 1;
-
             if subtrees.len() >= MAX_SUBTREES_PER_FILE {
                 break; // Stop if we have too many subtrees
             }
 
             let size = count_subtree_nodes(ast, node.id);
 
-            // Debug: Show node details
-            if function_count <= 3 {
-                eprintln!(
-                    "    DEBUG: {:?} '{}' id={} has {} children, counted size={}",
-                    node.kind,
-                    node.text.as_deref().unwrap_or("unnamed"),
-                    node.id,
-                    node.children.len(),
-                    size
-                );
-            }
-
             // Only include subtrees above minimum size and below maximum size
             if size < effective_min_nodes {
-                too_small_count += 1;
-                eprintln!(
-                    "    Skipping {:?} '{}' (size {} < min {})",
-                    node.kind,
-                    node.text.as_deref().unwrap_or("unnamed"),
-                    size,
-                    effective_min_nodes
-                );
                 continue;
             }
 
             if size > MAX_SUBTREE_SIZE {
-                too_large_count += 1;
                 continue;
             }
 
             // Skip trivial nodes that are likely boilerplate
             if self.is_trivial_subtree(ast, node.id) {
-                trivial_count += 1;
                 continue;
             }
 
@@ -121,17 +92,6 @@ impl AstBasedDetector {
                 size,
                 hash: self.hash_subtree(ast, node.id),
             });
-        }
-
-        if function_count > 0 {
-            eprintln!(
-                "    Found {} functions/classes: {} extracted, {} too small, {} too large, {} trivial",
-                function_count,
-                subtrees.len(),
-                too_small_count,
-                too_large_count,
-                trivial_count
-            );
         }
 
         subtrees
@@ -213,9 +173,8 @@ impl AstBasedDetector {
             .collect();
 
         let parse_errors = files.len() - parsed_files.len();
-        eprintln!("  Parsed {}/{} files successfully", parsed_files.len(), files.len());
         if parse_errors > 0 {
-            eprintln!("  {} files failed to parse and were skipped", parse_errors);
+            eprintln!("  Warning: {} files failed to parse and were skipped", parse_errors);
         }
 
         // Extract all subtrees
@@ -230,8 +189,6 @@ impl AstBasedDetector {
             })
             .collect();
 
-        eprintln!("  Extracted {} subtrees from parsed files", all_subtrees.len());
-
         // Group subtrees by hash for candidate pairs
         let hash_map: Arc<DashMap<u64, Vec<(usize, SubtreeInfo)>>> = Arc::new(DashMap::new());
 
@@ -241,8 +198,6 @@ impl AstBasedDetector {
                 .or_insert_with(Vec::new)
                 .push((file_idx, subtree));
         }
-
-        eprintln!("  Grouped into {} unique hash buckets", hash_map.len());
 
         // Create candidate pairs from hash groups
         let mut candidates = Vec::new();
@@ -265,8 +220,6 @@ impl AstBasedDetector {
                 }
             }
         }
-
-        eprintln!("  Generated {} candidate pairs for comparison", candidates.len());
 
         Ok((candidates, parsed_files))
     }
@@ -448,9 +401,6 @@ fn count_subtree_nodes(ast: &Ast, node_id: usize) -> usize {
             for &child_id in &node.children {
                 stack.push(child_id);
             }
-        } else {
-            // DEBUG: Node not found
-            eprintln!("    DEBUG count_subtree_nodes: node {} not found in AST!", current_id);
         }
     }
 
