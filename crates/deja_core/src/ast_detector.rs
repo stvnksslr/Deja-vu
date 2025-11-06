@@ -142,7 +142,7 @@ impl AstBasedDetector {
         let all_subtrees: Vec<(usize, SubtreeInfo)> = asts
             .par_iter()
             .enumerate()
-            .flat_map(|(file_idx, (_file, ast))| {
+            .flat_map_iter(|(file_idx, (_file, ast))| {
                 self.extract_subtrees(ast, min_nodes)
                     .into_iter()
                     .map(move |st| (file_idx, st))
