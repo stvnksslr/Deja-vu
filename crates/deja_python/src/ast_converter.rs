@@ -85,8 +85,9 @@ impl<'a> PythonAstConverter<'a> {
                     Span::new(0, self.source.len(), 1, self.source.lines().count(), 0, 0),
                 );
 
-                self.ast.add_node(module_node);
-                self.ast.root = module_id;
+                // add_node() reassigns the ID - use the returned ID!
+                let actual_module_id = self.ast.add_node(module_node);
+                self.ast.root = actual_module_id;
 
                 // Convert all statements in the module
                 let mut children = Vec::new();
@@ -97,7 +98,7 @@ impl<'a> PythonAstConverter<'a> {
                 }
 
                 // Update module node with children
-                if let Some(node) = self.ast.get_node_mut(module_id) {
+                if let Some(node) = self.ast.get_node_mut(actual_module_id) {
                     node.children = children;
                 }
 
@@ -238,8 +239,9 @@ impl<'a> PythonAstConverter<'a> {
         }
         node = node.with_children(children);
 
-        self.ast.add_node(node);
-        Some(id)
+        // add_node() reassigns the ID - use the returned ID!
+        let actual_id = self.ast.add_node(node);
+        Some(actual_id)
     }
 
     fn convert_parameter(&mut self, param: &ast::Parameter) -> Option<usize> {
@@ -249,8 +251,9 @@ impl<'a> PythonAstConverter<'a> {
         let node = AstNode::new(id, NodeKind::Parameter, span)
             .with_text(param.name.to_string());
 
-        self.ast.add_node(node);
-        Some(id)
+        // add_node() reassigns the ID - use the returned ID!
+        let actual_id = self.ast.add_node(node);
+        Some(actual_id)
     }
 
     fn convert_expr(&mut self, expr: &ast::Expr) -> Option<usize> {
@@ -358,8 +361,9 @@ impl<'a> PythonAstConverter<'a> {
         }
         node = node.with_children(children);
 
-        self.ast.add_node(node);
-        Some(id)
+        // add_node() reassigns the ID - use the returned ID!
+        let actual_id = self.ast.add_node(node);
+        Some(actual_id)
     }
 }
 
