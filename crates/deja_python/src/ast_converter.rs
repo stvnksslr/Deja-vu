@@ -24,7 +24,6 @@ struct PythonAstConverter<'a> {
     source: &'a str,
     source_file: &'a str,
     ast: Ast,
-    next_id: usize,
 }
 
 impl<'a> PythonAstConverter<'a> {
@@ -33,14 +32,7 @@ impl<'a> PythonAstConverter<'a> {
             source,
             source_file,
             ast: Ast::new(source_file.to_string()),
-            next_id: 0,
         }
-    }
-
-    fn next_id(&mut self) -> usize {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
     }
 
     fn create_span(&self, range: ruff_text_size::TextRange) -> Span {
@@ -78,16 +70,16 @@ impl<'a> PythonAstConverter<'a> {
     fn convert(mut self, module: &ast::Mod) -> Result<Ast, AstError> {
         match module {
             ast::Mod::Module(m) => {
-                let module_id = self.next_id();
+                // Create module node (ID will be assigned by add_node based on position)
                 let module_node = AstNode::new(
-                    module_id,
+                    0,  // Dummy ID - add_node() will assign the real ID
                     NodeKind::Module,
                     Span::new(0, self.source.len(), 1, self.source.lines().count(), 0, 0),
                 );
 
-                // add_node() reassigns the ID - use the returned ID!
-                let actual_module_id = self.ast.add_node(module_node);
-                self.ast.root = actual_module_id;
+                // add_node() assigns ID based on vector position and returns it
+                let module_id = self.ast.add_node(module_node);
+                self.ast.root = module_id;
 
                 // Convert all statements in the module
                 let mut children = Vec::new();
@@ -98,7 +90,7 @@ impl<'a> PythonAstConverter<'a> {
                 }
 
                 // Update module node with children
-                if let Some(node) = self.ast.get_node_mut(actual_module_id) {
+                if let Some(node) = self.ast.get_node_mut(module_id) {
                     node.children = children;
                 }
 
@@ -109,7 +101,6 @@ impl<'a> PythonAstConverter<'a> {
     }
 
     fn convert_stmt(&mut self, stmt: &ast::Stmt) -> Option<usize> {
-        let id = self.next_id();
         let span = self.create_span(stmt.range());
 
         let (kind, text, children) = match stmt {
@@ -233,31 +224,29 @@ impl<'a> PythonAstConverter<'a> {
             _ => (NodeKind::Unknown("UnsupportedStatement".to_string()), None, Vec::new()),
         };
 
-        let mut node = AstNode::new(id, kind, span);
+        let mut node = AstNode::new(0, kind, span);  // Dummy ID
         if let Some(text) = text {
             node = node.with_text(text);
         }
         node = node.with_children(children);
 
-        // add_node() reassigns the ID - use the returned ID!
-        let actual_id = self.ast.add_node(node);
-        Some(actual_id)
+        // add_node() assigns ID and returns it
+        let node_id = self.ast.add_node(node);
+        Some(node_id)
     }
 
     fn convert_parameter(&mut self, param: &ast::Parameter) -> Option<usize> {
-        let id = self.next_id();
         let span = self.create_span(param.range());
 
-        let node = AstNode::new(id, NodeKind::Parameter, span)
+        let node = AstNode::new(0, NodeKind::Parameter, span)  // Dummy ID
             .with_text(param.name.to_string());
 
-        // add_node() reassigns the ID - use the returned ID!
-        let actual_id = self.ast.add_node(node);
-        Some(actual_id)
+        // add_node() assigns ID and returns it
+        let node_id = self.ast.add_node(node);
+        Some(node_id)
     }
 
     fn convert_expr(&mut self, expr: &ast::Expr) -> Option<usize> {
-        let id = self.next_id();
         let span = self.create_span(expr.range());
 
         let (kind, text, children) = match expr {
@@ -355,15 +344,15 @@ impl<'a> PythonAstConverter<'a> {
             _ => (NodeKind::Unknown("UnsupportedExpression".to_string()), None, Vec::new()),
         };
 
-        let mut node = AstNode::new(id, kind, span);
+        let mut node = AstNode::new(0, kind, span);  // Dummy ID
         if let Some(text) = text {
             node = node.with_text(text);
         }
         node = node.with_children(children);
 
-        // add_node() reassigns the ID - use the returned ID!
-        let actual_id = self.ast.add_node(node);
-        Some(actual_id)
+        // add_node() assigns ID and returns it
+        let node_id = self.ast.add_node(node);
+        Some(node_id)
     }
 }
 
