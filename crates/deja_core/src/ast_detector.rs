@@ -275,6 +275,17 @@ impl AstBasedDetector {
                     candidate.subtree2.size,
                 );
 
+                // Debug: Check for invalid similarities
+                if similarity > 1.5 || similarity < 0.0 {
+                    eprintln!(
+                        "WARNING: Invalid similarity {:.1}% (distance={:.1}, size1={}, size2={})",
+                        similarity * 100.0,
+                        distance,
+                        candidate.subtree1.size,
+                        candidate.subtree2.size
+                    );
+                }
+
                 // Only keep pairs above similarity threshold
                 if similarity >= config.similarity_threshold {
                     Some(ClonePair {
